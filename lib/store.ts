@@ -28,6 +28,10 @@ type GameState = {
   gameStarted: boolean
   paused: boolean
   resetNonce: number
+  // Surprise potions
+  jumpBoostUntil: number // AudioContext / performance time (s) when boost ends
+  teleportCharges: number
+  pendingTeleport: [number, number, number] | null
 
   // Setters
   setMobileMove: (v: Vec2) => void
@@ -47,6 +51,10 @@ type GameState = {
   setPaused: (b: boolean) => void
   togglePause: () => void
   resetGame: () => void
+  activateJumpBoost: (durationSec: number) => void
+  grantTeleport: (charges: number) => void
+  consumeTeleport: () => boolean
+  setPendingTeleport: (pos: [number, number, number] | null) => void
 }
 
 const SCALE_FACTOR = 1.12
@@ -89,6 +97,9 @@ export const useGameStore = create<GameState>((set) => ({
   gameStarted: false,
   paused: false,
   resetNonce: 0,
+  jumpBoostUntil: 0,
+  teleportCharges: 0,
+  pendingTeleport: null,
 
   setMobileMove: (mobileMove) => set({ mobileMove }),
   setMobileJump: (mobileJump) => set({ mobileJump }),
@@ -186,7 +197,27 @@ export const useGameStore = create<GameState>((set) => ({
       playerHP: PLAYER_HP_MAX,
       paused: false,
       resetNonce: s.resetNonce + 1,
+      jumpBoostUntil: 0,
+      teleportCharges: 0,
+      pendingTeleport: null,
     })),
+
+  activateJumpBoost: (durationSec) =>
+    set((s) => {
+      const nowS = (typeof performance !== 'undefined' ? performance.now() : 0) / 1000
+      // Extend if already active
+      const base = Math.max(s.jumpBoostUntil, nowS)
+      return { jumpBoostUntil: base + durationSec }
+    }),
+  grantTeleport: (charges) =>
+    set((s) => ({ teleportCharges: s.teleportCharges + charges })),
+  consumeTeleport: () => {
+    const s = useGameStore.getState()
+    if (s.teleportCharges <= 0) return false
+    useGameStore.setState({ teleportCharges: s.teleportCharges - 1 })
+    return true
+  },
+  setPendingTeleport: (pendingTeleport) => set({ pendingTeleport }),
 }))
 
 // Safe zone configuration

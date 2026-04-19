@@ -18,6 +18,7 @@ import SkyBalloons from './SkyBalloons'
 import Village from './Village'
 import Beach from './Beach'
 import Lake from './Lake'
+import SurprisePotions from './SurprisePotions'
 import { useGameStore } from '@/lib/store'
 
 export default function World() {
@@ -39,6 +40,7 @@ export default function World() {
       <Village />
       <Beach />
       <Lake />
+      <SurprisePotions />
       <Building position={[18, 0, -6]} height={24} />
       <SpiralStairs position={[-16, 0, -4]} height={16} />
       <HitParticles />

@@ -3,18 +3,20 @@
 import { useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { RigidBody, CuboidCollider } from '@react-three/rapier'
+import { MeshReflectorMaterial } from '@react-three/drei'
 import type { Mesh } from 'three'
+import { useGameStore } from '@/lib/store'
 
 const LAKE_CENTER: [number, number, number] = [-70, 0, 55]
 const LAKE_R = 22
 
 export default function Lake() {
   const waterRef = useRef<Mesh>(null)
+  const isMobile = useGameStore((s) => s.isMobile)
 
   useFrame((state) => {
     if (!waterRef.current) return
     const t = state.clock.elapsedTime
-    // Subtle wave: small scale + slight tilt animation
     waterRef.current.rotation.z = Math.sin(t * 0.4) * 0.008
     waterRef.current.position.y = 0.06 + Math.sin(t * 0.7) * 0.04
   })
@@ -32,23 +34,38 @@ export default function Lake() {
         <circleGeometry args={[LAKE_R + 3, 48]} />
         <meshToonMaterial color="#d7cba7" />
       </mesh>
-      {/* Water surface */}
+      {/* Water surface — reflective! */}
       <mesh
         ref={waterRef}
         position={[0, 0.06, 0]}
         rotation={[-Math.PI / 2, 0, 0]}
-        receiveShadow
       >
         <circleGeometry args={[LAKE_R, 48]} />
-        <meshStandardMaterial
-          color="#4aa3df"
-          roughness={0.3}
-          metalness={0.2}
-          emissive="#1a5e8f"
-          emissiveIntensity={0.15}
-          transparent
-          opacity={0.9}
-        />
+        {isMobile ? (
+          <meshStandardMaterial
+            color="#4aa3df"
+            roughness={0.3}
+            metalness={0.2}
+            emissive="#1a5e8f"
+            emissiveIntensity={0.15}
+            transparent
+            opacity={0.9}
+          />
+        ) : (
+          <MeshReflectorMaterial
+            blur={[300, 80]}
+            resolution={512}
+            mixBlur={1}
+            mixStrength={40}
+            roughness={0.7}
+            depthScale={1}
+            minDepthThreshold={0.4}
+            maxDepthThreshold={1.4}
+            color="#4aa3df"
+            metalness={0.4}
+            mirror={0.6}
+          />
+        )}
       </mesh>
       {/* Lily pads */}
       {[
@@ -63,7 +80,6 @@ export default function Lake() {
             <circleGeometry args={[0.9, 10]} />
             <meshToonMaterial color={p[2] as string} />
           </mesh>
-          {/* Lotus flower */}
           <mesh position={[0, 0.15, 0]}>
             <sphereGeometry args={[0.22, 8, 8]} />
             <meshToonMaterial color="#ffafcc" />
@@ -74,16 +90,11 @@ export default function Lake() {
       {/* Dock */}
       <group position={[LAKE_R - 2, 0, 0]}>
         <RigidBody type="fixed" colliders={false}>
-          {/* Dock planks */}
-          <CuboidCollider
-            args={[3, 0.15, 1.2]}
-            position={[2, 0.3, 0]}
-          />
+          <CuboidCollider args={[3, 0.15, 1.2]} position={[2, 0.3, 0]} />
           <mesh position={[2, 0.3, 0]} castShadow receiveShadow>
             <boxGeometry args={[6, 0.3, 2.4]} />
             <meshToonMaterial color="#8d6e63" />
           </mesh>
-          {/* Support posts */}
           <mesh position={[-0.6, -0.4, 1]} castShadow>
             <cylinderGeometry args={[0.15, 0.2, 1.4, 6]} />
             <meshToonMaterial color="#5d4037" />
@@ -117,7 +128,6 @@ export default function Lake() {
           <boxGeometry args={[0.8, 0.3, 1]} />
           <meshToonMaterial color="#fb5607" />
         </mesh>
-        {/* Seat */}
         <mesh position={[0, 0.55, 0]} castShadow>
           <boxGeometry args={[2, 0.1, 0.5]} />
           <meshToonMaterial color="#5d4037" />

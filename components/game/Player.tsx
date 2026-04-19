@@ -12,8 +12,9 @@ import { MathUtils, Vector3, type Group } from 'three'
 import { useGameStore, SAFE_ZONE, PLAYER_HP_MAX } from '@/lib/store'
 import { getCreatures } from '@/lib/creatureRegistry'
 import { registerPlayer, unregisterPlayer } from '@/lib/playerHandle'
-import { playJump, playLand, playHit, playDamage } from '@/lib/sounds'
+import { playJump, playLand, playHit, playDamage, playLaunch } from '@/lib/sounds'
 import { spawnImpact } from '@/lib/particles'
+import { TELEPORT_POINTS } from './SurprisePotions'
 
 const BASE_SPEED = 10
 const JUMP = 13
@@ -127,6 +128,50 @@ export default function Player() {
     })
     return () => unregisterPlayer()
   }, [scale])
+
+  // Keyboard T → teleport (consume charge, random destination)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 't' && e.key !== 'T') return
+      if (e.repeat) return
+      const state = useGameStore.getState()
+      if (!state.gameStarted || state.paused) return
+      if (!body.current) return
+      if (state.teleportCharges <= 0) return
+      if (!state.consumeTeleport()) return
+
+      const from = body.current.translation()
+      const idx = Math.floor(Math.random() * TELEPORT_POINTS.length)
+      const dest = TELEPORT_POINTS[idx]
+      // Avoid teleporting to same spot
+      const d2 =
+        (dest[0] - from.x) * (dest[0] - from.x) +
+        (dest[2] - from.z) * (dest[2] - from.z)
+      const finalDest =
+        d2 < 100
+          ? TELEPORT_POINTS[(idx + 1) % TELEPORT_POINTS.length]
+          : dest
+
+      // Visual burst at both ends
+      spawnImpact(from.x, from.y + 0.5, from.z, '#c77dff', 1.3)
+      spawnImpact(
+        finalDest[0],
+        finalDest[1] + 0.3,
+        finalDest[2],
+        '#c77dff',
+        1.3
+      )
+      playLaunch()
+
+      body.current.setTranslation(
+        { x: finalDest[0], y: finalDest[1] + 1, z: finalDest[2] },
+        true
+      )
+      body.current.setLinvel({ x: 0, y: 0, z: 0 }, true)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
 
   // Keyboard V → toggle camera + pointer lock
   useEffect(() => {
@@ -400,8 +445,10 @@ export default function Player() {
 
       if ((keys.jump || mobileJump) && grounded) {
         const mass = body.current.mass()
+        const nowSec = performance.now() / 1000
+        const jumpBoost = useGameStore.getState().jumpBoostUntil > nowSec ? 1.9 : 1
         body.current.applyImpulse(
-          { x: 0, y: JUMP * mass * Math.pow(scale, 0.55), z: 0 },
+          { x: 0, y: JUMP * mass * Math.pow(scale, 0.55) * jumpBoost, z: 0 },
           true
         )
         playJump()

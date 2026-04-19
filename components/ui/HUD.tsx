@@ -15,12 +15,25 @@ export default function HUD() {
   const toggleCamera = useGameStore((s) => s.toggleCamera)
   const togglePause = useGameStore((s) => s.togglePause)
   const gameStarted = useGameStore((s) => s.gameStarted)
+  const jumpBoostUntil = useGameStore((s) => s.jumpBoostUntil)
+  const teleportCharges = useGameStore((s) => s.teleportCharges)
 
   const [pointerLocked, setPointerLocked] = useState(false)
   const [muted, setMutedLocal] = useState(false)
   const [musicOn, setMusicOn] = useState(true)
   const [showCongrats, setShowCongrats] = useState(false)
   const [lastHighCheck, setLastHighCheck] = useState(0)
+  const [jumpBoostLeft, setJumpBoostLeft] = useState(0)
+
+  // Jump boost timer tick
+  useEffect(() => {
+    const id = setInterval(() => {
+      const nowS = performance.now() / 1000
+      const left = Math.max(0, jumpBoostUntil - nowS)
+      setJumpBoostLeft(left)
+    }, 250)
+    return () => clearInterval(id)
+  }, [jumpBoostUntil])
 
   useEffect(() => {
     const onChange = () => setPointerLocked(!!document.pointerLockElement)
@@ -107,6 +120,50 @@ export default function HUD() {
           </div>
         </div>
       </div>
+
+      {/* Surprise potion effects */}
+      {(jumpBoostLeft > 0 || teleportCharges > 0) && (
+        <div
+          className={`absolute ${isMobile ? 'left-4 top-[88px]' : 'left-4 top-[104px]'} flex w-48 flex-col gap-1 rounded-xl bg-black/40 px-3 py-2 text-white shadow-lg backdrop-blur-sm`}
+        >
+          {jumpBoostLeft > 0 && (
+            <div className="flex items-center gap-2 text-xs font-bold">
+              <span className="text-base">⬆️</span>
+              <span className="flex-1">Zıplama ×1.9</span>
+              <span className="tabular-nums text-green-300">
+                {jumpBoostLeft.toFixed(1)}s
+              </span>
+            </div>
+          )}
+          {teleportCharges > 0 && (
+            <button
+              onClick={() => {
+                document.dispatchEvent(
+                  new KeyboardEvent('keydown', { key: 'T' })
+                )
+              }}
+              onTouchStart={(e) => {
+                e.preventDefault()
+                document.dispatchEvent(
+                  new KeyboardEvent('keydown', { key: 'T' })
+                )
+              }}
+              className="pointer-events-auto flex items-center gap-2 rounded-lg bg-gradient-to-r from-purple-500/60 to-fuchsia-500/60 px-2 py-1 text-xs font-bold text-white transition active:scale-95"
+            >
+              <span className="text-base">✨</span>
+              <span className="flex-1 text-left">
+                Işınlan{' '}
+                {!isMobile && (
+                  <span className="opacity-60 font-normal">(T)</span>
+                )}
+              </span>
+              <span className="tabular-nums text-purple-100">
+                ×{teleportCharges}
+              </span>
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Score + high score + buttons (top right) */}
       <div className="absolute right-4 top-4 flex items-start gap-2">

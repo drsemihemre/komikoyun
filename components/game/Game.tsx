@@ -2,10 +2,11 @@
 
 import { Canvas } from '@react-three/fiber'
 import { Physics } from '@react-three/rapier'
-import { KeyboardControls, PerformanceMonitor, Sky } from '@react-three/drei'
+import { KeyboardControls, PerformanceMonitor } from '@react-three/drei'
 import { useEffect, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
-import type { DirectionalLight } from 'three'
+import type { DirectionalLight, AmbientLight } from 'three'
+import DayNightCycle from './DayNightCycle'
 import Player from './Player'
 import World from './World'
 import HUD from '../ui/HUD'
@@ -48,15 +49,18 @@ export default function Game() {
   const paused = useGameStore((s) => s.paused)
   const togglePause = useGameStore((s) => s.togglePause)
   const [dpr, setDpr] = useState<[number, number]>([1, 1.5])
+  const [mobile, setMobileLocal] = useState(false)
   const lightRef = useRef<DirectionalLight>(null)
+  const ambientRef = useRef<AmbientLight>(null)
 
   useEffect(() => {
-    const mobile =
+    const m =
       typeof window !== 'undefined' &&
       (/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
         window.matchMedia('(pointer: coarse)').matches)
-    setIsMobile(mobile)
-    setDpr(mobile ? [1, 1.25] : [1, 1.6])
+    setIsMobile(m)
+    setMobileLocal(m)
+    setDpr(m ? [1, 1.2] : [1, 1.6])
   }, [setIsMobile])
 
   useEffect(() => {
@@ -101,14 +105,18 @@ export default function Game() {
           performance={{ min: 0.5 }}
         >
           <PerformanceMonitor flipflops={3} onFallback={() => setDpr([1, 1])} />
-          <Sky sunPosition={[100, 30, 100]} turbidity={2} rayleigh={0.5} />
-          <ambientLight intensity={0.85} />
+          <DayNightCycle
+            dirLightRef={lightRef}
+            ambientRef={ambientRef}
+            cycleSeconds={210}
+          />
+          <ambientLight ref={ambientRef} intensity={0.85} />
           <directionalLight
             ref={lightRef}
             position={[20, 35, 18]}
             intensity={1.4}
             castShadow
-            shadow-mapSize={[1024, 1024]}
+            shadow-mapSize={mobile ? [512, 512] : [1024, 1024]}
             shadow-camera-left={-35}
             shadow-camera-right={35}
             shadow-camera-top={35}
