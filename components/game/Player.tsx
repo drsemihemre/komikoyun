@@ -106,6 +106,24 @@ export default function Player() {
       launch: (impulse) => {
         pendingLaunch.current = impulse
       },
+      reset: () => {
+        if (!body.current) return
+        body.current.setTranslation({ x: 0, y: 3, z: 0 }, true)
+        body.current.setLinvel({ x: 0, y: 0, z: 0 }, true)
+        body.current.setAngvel({ x: 0, y: 0, z: 0 }, true)
+        body.current.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true)
+        body.current.setEnabledRotations(false, false, false, true)
+        isRagdoll.current = false
+        settleStartT.current = 0
+        pendingLaunch.current = null
+        airTime.current = 0
+        peakFallVel.current = 0
+        currentYaw.current = 0
+        targetYaw.current = 0
+        mouseYaw.current = 0
+        mousePitch.current = 0
+        smoothInput.current.set(0, 0, 0)
+      },
     })
     return () => unregisterPlayer()
   }, [scale])
@@ -187,9 +205,34 @@ export default function Player() {
       speedMult,
       playerHP,
       setPlayerHP,
+      paused,
+      gameStarted,
     } = useGameStore.getState()
     const keys = getKeys()
     const now = state.clock.elapsedTime
+
+    // Oyun duraklatıldı veya başlamadıysa: sadece kamera takibini koru, mantığı atla
+    if (paused || !gameStarted) {
+      const pos = body.current.translation()
+      if (cameraMode !== 'first') {
+        const camHeight = 6 + scale * 1.2
+        const camBack = 12 + scale * 1.8
+        camDesired.current.set(pos.x, pos.y + camHeight, pos.z + camBack)
+        state.camera.position.lerp(
+          camDesired.current,
+          1 - Math.exp(-6 * delta)
+        )
+        camLookAt.current.set(pos.x, pos.y + 1.2 * scale, pos.z)
+        camCurrentLook.current.lerp(
+          camLookAt.current,
+          1 - Math.exp(-10 * delta)
+        )
+        state.camera.lookAt(camCurrentLook.current)
+      }
+      wasAttackPressed.current = false
+      wasGrounded.current = true
+      return
+    }
 
     const pos = body.current.translation()
     const linvel = body.current.linvel()
@@ -203,16 +246,18 @@ export default function Player() {
       peakFallVel.current = linvel.y
     }
 
-    // Landing detection → fall damage + land sound
+    // Landing detection → fall damage + land sound (azaltılmış)
     if (grounded && !wasGrounded.current) {
       const impact = -peakFallVel.current
-      if (impact > 4) {
+      if (impact > 3) {
         playLand(impact)
-        if (impact > 6 && !isRagdoll.current) {
-          // Small damage threshold, scales with impact
-          const dmg = Math.min(60, Math.floor((impact - 6) * 2.8 + 3))
-          useGameStore.getState().damagePlayer(dmg)
-          playDamage()
+        if (impact > 9 && !isRagdoll.current) {
+          // Yumuşak ramp: 9 altı hasarsız, yavaş artan, max 25
+          const dmg = Math.min(25, Math.floor((impact - 9) * 1.1 + 1))
+          if (dmg > 0) {
+            useGameStore.getState().damagePlayer(dmg)
+            playDamage()
+          }
         }
       }
       peakFallVel.current = 0

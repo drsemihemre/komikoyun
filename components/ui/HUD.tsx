@@ -13,6 +13,8 @@ export default function HUD() {
   const playerHP = useGameStore((s) => s.playerHP)
   const cameraMode = useGameStore((s) => s.cameraMode)
   const toggleCamera = useGameStore((s) => s.toggleCamera)
+  const togglePause = useGameStore((s) => s.togglePause)
+  const gameStarted = useGameStore((s) => s.gameStarted)
 
   const [pointerLocked, setPointerLocked] = useState(false)
   const [muted, setMutedLocal] = useState(false)
@@ -160,6 +162,19 @@ export default function HUD() {
         >
           {muted ? '🔇' : '🔊'}
         </button>
+        {gameStarted && (
+          <button
+            onClick={() => togglePause()}
+            onTouchStart={(e) => {
+              e.preventDefault()
+              togglePause()
+            }}
+            className="pointer-events-auto flex h-11 w-11 items-center justify-center rounded-xl bg-black/40 text-xl text-white shadow-lg backdrop-blur-sm transition hover:bg-black/60 active:scale-95"
+            title="Duraklat"
+          >
+            ⏸️
+          </button>
+        )}
       </div>
 
       {/* New high score toast */}

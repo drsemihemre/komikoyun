@@ -1,3 +1,5 @@
+'use client'
+
 import Ground from './Ground'
 import Boundary from './Boundary'
 import Building from './Building'
@@ -12,21 +14,31 @@ import BalloonPalace from './BalloonPalace'
 import Clouds from './Clouds'
 import Decorations from './Decorations'
 import HitParticles from './HitParticles'
+import SkyBalloons from './SkyBalloons'
+import Village from './Village'
+import Beach from './Beach'
+import Lake from './Lake'
+import { useGameStore } from '@/lib/store'
 
 export default function World() {
+  const resetNonce = useGameStore((s) => s.resetNonce)
   return (
     <>
       <Ground />
       <Boundary />
       <Clouds />
+      <SkyBalloons />
       <Decorations />
       <SafeZone />
-      <Arena />
+      <Arena key={resetNonce} />
       <HupaLupa />
       <Road />
       <Catapult />
       <Balloon />
       <BalloonPalace />
+      <Village />
+      <Beach />
+      <Lake />
       <Building position={[18, 0, -6]} height={24} />
       <SpiralStairs position={[-16, 0, -4]} height={16} />
       <HitParticles />

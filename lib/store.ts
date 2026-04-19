@@ -24,6 +24,10 @@ type GameState = {
   playerHP: number
   // Camera
   cameraMode: CameraMode
+  // Game flow
+  gameStarted: boolean
+  paused: boolean
+  resetNonce: number
 
   // Setters
   setMobileMove: (v: Vec2) => void
@@ -39,6 +43,10 @@ type GameState = {
   healPlayer: (amount: number) => void
   setPlayerHP: (hp: number) => void
   toggleCamera: () => void
+  setGameStarted: (b: boolean) => void
+  setPaused: (b: boolean) => void
+  togglePause: () => void
+  resetGame: () => void
 }
 
 const SCALE_FACTOR = 1.12
@@ -78,6 +86,9 @@ export const useGameStore = create<GameState>((set) => ({
   highScore: initialStats.highScore,
   playerHP: PLAYER_HP_MAX,
   cameraMode: 'third',
+  gameStarted: false,
+  paused: false,
+  resetNonce: 0,
 
   setMobileMove: (mobileMove) => set({ mobileMove }),
   setMobileJump: (mobileJump) => set({ mobileJump }),
@@ -160,6 +171,22 @@ export const useGameStore = create<GameState>((set) => ({
   setPlayerHP: (playerHP) => set({ playerHP }),
   toggleCamera: () =>
     set((s) => ({ cameraMode: s.cameraMode === 'third' ? 'first' : 'third' })),
+
+  setGameStarted: (gameStarted) => set({ gameStarted }),
+  setPaused: (paused) => set({ paused }),
+  togglePause: () => set((s) => ({ paused: !s.paused })),
+  resetGame: () =>
+    set((s) => ({
+      hitCount: 0,
+      koCount: 0,
+      score: 0,
+      scale: 1,
+      speedMult: 1,
+      potionHits: { grow: 0, shrink: 0, speed: 0, slow: 0 },
+      playerHP: PLAYER_HP_MAX,
+      paused: false,
+      resetNonce: s.resetNonce + 1,
+    })),
 }))
 
 // Safe zone configuration

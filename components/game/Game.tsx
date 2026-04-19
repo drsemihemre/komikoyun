@@ -11,6 +11,8 @@ import World from './World'
 import HUD from '../ui/HUD'
 import MobileJoystick from '../ui/MobileJoystick'
 import PotionInventory from '../ui/PotionInventory'
+import StartScreen from '../ui/StartScreen'
+import PauseMenu from '../ui/PauseMenu'
 import { useGameStore } from '@/lib/store'
 import { getPlayerPos } from '@/lib/playerHandle'
 import { startMusic } from '@/lib/sounds'
@@ -22,8 +24,6 @@ const controlKeys = [
   { name: 'right', keys: ['ArrowRight', 'd', 'D'] },
   { name: 'jump', keys: ['Space'] },
   { name: 'attack', keys: ['f', 'F', 'q', 'Q'] },
-  // 'camera' V tuşu Player.tsx içindeki doğrudan keydown listener'ıyla işleniyor
-  // (pointer lock user-activation gerektirdiği için)
 ]
 
 function ShadowFollower({
@@ -44,6 +44,9 @@ function ShadowFollower({
 
 export default function Game() {
   const setIsMobile = useGameStore((s) => s.setIsMobile)
+  const gameStarted = useGameStore((s) => s.gameStarted)
+  const paused = useGameStore((s) => s.paused)
+  const togglePause = useGameStore((s) => s.togglePause)
   const [dpr, setDpr] = useState<[number, number]>([1, 1.5])
   const lightRef = useRef<DirectionalLight>(null)
 
@@ -56,7 +59,6 @@ export default function Game() {
     setDpr(mobile ? [1, 1.25] : [1, 1.6])
   }, [setIsMobile])
 
-  // Müziği ilk kullanıcı etkileşiminde başlat (tarayıcı gereksinimi)
   useEffect(() => {
     const start = () => startMusic()
     document.addEventListener('pointerdown', start, { once: true })
@@ -69,6 +71,25 @@ export default function Game() {
     }
   }, [])
 
+  // ESC → pause toggle (oyun başladıysa)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' && e.key !== 'p' && e.key !== 'P') return
+      if (e.repeat) return
+      const state = useGameStore.getState()
+      if (!state.gameStarted) return
+      // ESC'i pointer-lock çıkışı da tetiklemesi için burada da handle'la
+      if (state.cameraMode === 'first' && document.pointerLockElement) {
+        // Browser'ın doğal ESC davranışı zaten lock'u kırar; pause'a da geç
+      }
+      togglePause()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [togglePause])
+
+  const physicsPaused = paused || !gameStarted
+
   return (
     <div className="relative h-screen w-screen select-none overflow-hidden">
       <KeyboardControls map={controlKeys}>
@@ -79,10 +100,7 @@ export default function Game() {
           gl={{ antialias: true, powerPreference: 'high-performance' }}
           performance={{ min: 0.5 }}
         >
-          <PerformanceMonitor
-            flipflops={3}
-            onFallback={() => setDpr([1, 1])}
-          />
+          <PerformanceMonitor flipflops={3} onFallback={() => setDpr([1, 1])} />
           <Sky sunPosition={[100, 30, 100]} turbidity={2} rayleigh={0.5} />
           <ambientLight intensity={0.85} />
           <directionalLight
@@ -99,7 +117,7 @@ export default function Game() {
             shadow-camera-far={150}
             shadow-bias={-0.0005}
           />
-          <Physics gravity={[0, -22, 0]} interpolate>
+          <Physics gravity={[0, -22, 0]} interpolate paused={physicsPaused}>
             <ShadowFollower lightRef={lightRef} />
             <World />
             <Player />
@@ -109,6 +127,8 @@ export default function Game() {
       <HUD />
       <PotionInventory />
       <MobileJoystick />
+      <PauseMenu />
+      <StartScreen />
     </div>
   )
 }
