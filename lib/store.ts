@@ -17,6 +17,8 @@ type GameState = {
   potionHits: Record<PotionType, number>
   // Combat stats
   hitCount: number
+  koCount: number
+  score: number
   playerHP: number
   // Camera
   cameraMode: CameraMode
@@ -29,6 +31,8 @@ type GameState = {
   drinkPotion: (p: PotionType) => void
   resetPotions: () => void
   incrementHitCount: () => void
+  addKo: () => void
+  addScore: (amount: number) => void
   damagePlayer: (amount: number) => void
   healPlayer: (amount: number) => void
   setPlayerHP: (hp: number) => void
@@ -53,6 +57,8 @@ export const useGameStore = create<GameState>((set) => ({
   speedMult: 1,
   potionHits: { grow: 0, shrink: 0, speed: 0, slow: 0 },
   hitCount: 0,
+  koCount: 0,
+  score: 0,
   playerHP: PLAYER_HP_MAX,
   cameraMode: 'third',
 
@@ -95,7 +101,10 @@ export const useGameStore = create<GameState>((set) => ({
       potionHits: { grow: 0, shrink: 0, speed: 0, slow: 0 },
     }),
 
-  incrementHitCount: () => set((s) => ({ hitCount: s.hitCount + 1 })),
+  incrementHitCount: () =>
+    set((s) => ({ hitCount: s.hitCount + 1, score: s.score + 10 })),
+  addKo: () => set((s) => ({ koCount: s.koCount + 1, score: s.score + 50 })),
+  addScore: (amount) => set((s) => ({ score: s.score + amount })),
   damagePlayer: (amount) =>
     set((s) => ({ playerHP: Math.max(0, s.playerHP - amount) })),
   healPlayer: (amount) =>

@@ -9,12 +9,17 @@ import Road from './Road'
 import Catapult from './Catapult'
 import Balloon from './Balloon'
 import BalloonPalace from './BalloonPalace'
+import Clouds from './Clouds'
+import Decorations from './Decorations'
+import HitParticles from './HitParticles'
 
 export default function World() {
   return (
     <>
       <Ground />
       <Boundary />
+      <Clouds />
+      <Decorations />
       <SafeZone />
       <Arena />
       <HupaLupa />
@@ -24,6 +29,7 @@ export default function World() {
       <BalloonPalace />
       <Building position={[18, 0, -6]} height={24} />
       <SpiralStairs position={[-16, 0, -4]} height={16} />
+      <HitParticles />
     </>
   )
 }

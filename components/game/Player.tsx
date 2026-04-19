@@ -12,6 +12,8 @@ import { MathUtils, Vector3, type Group } from 'three'
 import { useGameStore, SAFE_ZONE, PLAYER_HP_MAX } from '@/lib/store'
 import { getCreatures } from '@/lib/creatureRegistry'
 import { registerPlayer, unregisterPlayer } from '@/lib/playerHandle'
+import { playJump, playLand, playHit, playDamage } from '@/lib/sounds'
+import { spawnImpact } from '@/lib/particles'
 
 const BASE_SPEED = 10
 const JUMP = 13
@@ -57,6 +59,8 @@ export default function Player() {
   const ragdollStartT = useRef(0)
   const settleStartT = useRef(0)
   const pendingLaunch = useRef<[number, number, number] | null>(null)
+  const peakFallVel = useRef(0) // en küçük (negatif) vy havada
+  const wasGrounded = useRef(true)
 
   const attackProgress = useRef(-1)
   const lastAttackT = useRef(0)
@@ -79,10 +83,10 @@ export default function Player() {
         return { x: p.x, y: p.y, z: p.z }
       },
       takeHit: (damage, knockbackDir) => {
-        const { playerHP, damagePlayer, isMobile } = useGameStore.getState()
-        void isMobile
+        const { playerHP, damagePlayer } = useGameStore.getState()
         if (playerHP <= 0) return
         damagePlayer(damage)
+        playDamage()
         if (body.current) {
           const k = 5 * scale
           body.current.applyImpulse(
@@ -193,6 +197,27 @@ export default function Player() {
     const grounded = Math.abs(linvel.y) < 0.5
     if (grounded) airTime.current = 0
     else airTime.current += delta
+
+    // Track peak fall velocity for damage calc
+    if (!grounded && linvel.y < peakFallVel.current) {
+      peakFallVel.current = linvel.y
+    }
+
+    // Landing detection → fall damage + land sound
+    if (grounded && !wasGrounded.current) {
+      const impact = -peakFallVel.current
+      if (impact > 4) {
+        playLand(impact)
+        if (impact > 6 && !isRagdoll.current) {
+          // Small damage threshold, scales with impact
+          const dmg = Math.min(60, Math.floor((impact - 6) * 2.8 + 3))
+          useGameStore.getState().damagePlayer(dmg)
+          playDamage()
+        }
+      }
+      peakFallVel.current = 0
+    }
+    wasGrounded.current = grounded
 
     // --- PENDING LAUNCH (from catapult) ---
     if (pendingLaunch.current) {
@@ -334,6 +359,7 @@ export default function Player() {
           { x: 0, y: JUMP * mass * Math.pow(scale, 0.55), z: 0 },
           true
         )
+        playJump()
       }
 
       // ATTACK
@@ -367,9 +393,13 @@ export default function Player() {
             const dot = nx * fwdX + nz * fwdZ
             if (dot < 0.35) continue
             c.takeHit([nx * hitForce, 9 * scale, nz * hitForce])
+            spawnImpact(cp.x, cp.y + 0.5, cp.z, '#ffd60a', 0.8 + scale * 0.15)
             hits++
           }
-          if (hits > 0) useGameStore.getState().incrementHitCount()
+          if (hits > 0) {
+            useGameStore.getState().incrementHitCount()
+            playHit()
+          }
         }
       }
     }
@@ -419,7 +449,7 @@ export default function Player() {
         visualRoot.current.rotation.y = currentYaw.current
       }
       visualRoot.current.scale.setScalar(scale)
-      visualRoot.current.visible = cameraMode !== 'first' || isRagdoll.current
+      visualRoot.current.visible = true // FPV'de de gövde/kol/bacak görünür
     }
 
     const air = Math.min(1, airTime.current * 2)
@@ -455,6 +485,9 @@ export default function Player() {
       headPivot.current.rotation.z = isRagdoll.current
         ? Math.cos(now * 5) * 0.3
         : Math.sin(walkPhase.current * 0.5) * 0.06 * moveMag
+      // FPV'de kafayı gizle (kamera içinde) ama ragdoll'da görünür
+      headPivot.current.visible =
+        cameraMode !== 'first' || isRagdoll.current
     }
 
     if (bodyPivot.current) {

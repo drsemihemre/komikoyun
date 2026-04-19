@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react'
 import { useGameStore, type PotionType } from '@/lib/store'
+import { playPotion } from '@/lib/sounds'
 
 type PotionDef = {
   type: PotionType
@@ -43,7 +44,11 @@ const POTIONS: PotionDef[] = [
 ]
 
 export default function PotionInventory() {
-  const drinkPotion = useGameStore((s) => s.drinkPotion)
+  const drinkPotionRaw = useGameStore((s) => s.drinkPotion)
+  const drinkPotion = (p: PotionType) => {
+    drinkPotionRaw(p)
+    playPotion(p)
+  }
   const scale = useGameStore((s) => s.scale)
   const speedMult = useGameStore((s) => s.speedMult)
   const potionHits = useGameStore((s) => s.potionHits)

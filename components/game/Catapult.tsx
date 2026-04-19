@@ -5,6 +5,7 @@ import { RigidBody, CuboidCollider } from '@react-three/rapier'
 import { useFrame } from '@react-three/fiber'
 import { type Mesh, type Group, MathUtils } from 'three'
 import { getPlayerHandle } from '@/lib/playerHandle'
+import { playLaunch } from '@/lib/sounds'
 
 const POS: [number, number, number] = [0, 0, -14]
 // Launch vector: strong upward + northward (toward balloon palace at z=-75)
@@ -51,6 +52,7 @@ export default function Catapult() {
       } else if (chargeProgress >= 1) {
         // LAUNCH!
         if (player) player.launch(LAUNCH_IMPULSE)
+        playLaunch()
         chargeStart.current = -1
         lastLaunch.current = now
         chargeProgress = 0
