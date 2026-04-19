@@ -11,6 +11,7 @@ export default function MobileJoystick() {
   const isMobile = useGameStore((s) => s.isMobile)
   const setMobileMove = useGameStore((s) => s.setMobileMove)
   const setMobileJump = useGameStore((s) => s.setMobileJump)
+  const setMobileAttack = useGameStore((s) => s.setMobileAttack)
 
   const [stickOffset, setStickOffset] = useState({ x: 0, y: 0 })
   const activeTouchId = useRef<number | null>(null)
@@ -85,8 +86,9 @@ export default function MobileJoystick() {
       el.removeEventListener('touchcancel', onEnd)
       setMobileMove({ x: 0, y: 0 })
       setMobileJump(false)
+      setMobileAttack(false)
     }
-  }, [isMobile, setMobileMove, setMobileJump])
+  }, [isMobile, setMobileMove, setMobileJump, setMobileAttack])
 
   if (!isMobile) return null
 
@@ -98,21 +100,34 @@ export default function MobileJoystick() {
         className="pointer-events-auto absolute bottom-10 left-10 touch-none rounded-full border-4 border-white/70 bg-white/30 shadow-2xl backdrop-blur-sm"
         style={{ width: BASE, height: BASE }}
       >
-        {/* Center marker */}
-        <div
-          className="pointer-events-none absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/60"
-        />
-        {/* Stick */}
+        <div className="pointer-events-none absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/60" />
         <div
           className="pointer-events-none absolute left-1/2 top-1/2 rounded-full border-4 border-white bg-gradient-to-br from-white/95 to-white/75 shadow-xl"
           style={{
             width: STICK,
             height: STICK,
             transform: `translate(calc(-50% + ${stickOffset.x}px), calc(-50% + ${stickOffset.y}px))`,
-            transition: activeTouchId.current === null ? 'transform 120ms ease-out' : 'none',
+            transition:
+              activeTouchId.current === null ? 'transform 120ms ease-out' : 'none',
           }}
         />
       </div>
+
+      {/* Attack button (left of jump) */}
+      <button
+        className="absolute bottom-28 right-36 h-20 w-20 touch-none rounded-full border-4 border-white/80 bg-gradient-to-br from-red-500 to-rose-600 text-2xl font-black text-white shadow-2xl active:scale-95"
+        onTouchStart={(e) => {
+          e.preventDefault()
+          setMobileAttack(true)
+        }}
+        onTouchEnd={(e) => {
+          e.preventDefault()
+          setMobileAttack(false)
+        }}
+        onTouchCancel={() => setMobileAttack(false)}
+      >
+        👊
+      </button>
 
       {/* Jump button */}
       <button

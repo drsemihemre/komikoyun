@@ -9,19 +9,25 @@ import {
 import { useFrame } from '@react-three/fiber'
 import { useKeyboardControls } from '@react-three/drei'
 import { MathUtils, Vector3, type Group } from 'three'
-import { useGameStore } from '@/lib/store'
+import { useGameStore, SAFE_ZONE } from '@/lib/store'
+import { getCreatures } from '@/lib/creatureRegistry'
 
 const BASE_SPEED = 10
 const JUMP = 13
 const DEADZONE = 0.12
 const INPUT_SMOOTH = 16
 const ROT_SMOOTH = 10
-const WALK_HZ = 7 // adım frekansı
+const WALK_HZ = 7
+
+// Ragdoll thresholds
+const FALL_AIRTIME = 0.9
+const FALL_VEL_Y = -18
+const RAGDOLL_MIN_DURATION = 1.5
+const RAGDOLL_SETTLE_TIME = 0.7
 
 export default function Player() {
   const body = useRef<RapierRigidBody>(null)
 
-  // Visual refs
   const visualRoot = useRef<Group>(null)
   const tiltGroup = useRef<Group>(null)
   const headPivot = useRef<Group>(null)
@@ -31,7 +37,6 @@ export default function Player() {
   const leftLeg = useRef<Group>(null)
   const rightLeg = useRef<Group>(null)
 
-  // Frame-local state
   const rawInput = useRef(new Vector3())
   const smoothInput = useRef(new Vector3())
   const camDesired = useRef(new Vector3())
@@ -42,168 +47,320 @@ export default function Player() {
   const currentTilt = useRef({ x: 0, z: 0 })
   const walkPhase = useRef(0)
   const airTime = useRef(0)
-  const groundedTime = useRef(0)
   const bodyBob = useRef(0)
-  const [, getKeys] = useKeyboardControls()
 
+  // Ragdoll state
+  const isRagdoll = useRef(false)
+  const ragdollStartT = useRef(0)
+  const settleStartT = useRef(0)
+
+  // Attack state
+  const attackProgress = useRef(-1)
+  const lastAttackT = useRef(0)
+  const wasAttackPressed = useRef(false)
+
+  const [, getKeys] = useKeyboardControls()
   const scale = useGameStore((s) => s.scale)
 
   useFrame((state, delta) => {
     if (!body.current) return
 
-    const { mobileMove, mobileJump, speedMult } = useGameStore.getState()
+    const { mobileMove, mobileJump, mobileAttack, speedMult } =
+      useGameStore.getState()
     const keys = getKeys()
+    const now = state.clock.elapsedTime
 
-    // Raw input
+    const pos = body.current.translation()
+    const linvel = body.current.linvel()
+
+    // Grounded detection
+    const grounded = Math.abs(linvel.y) < 0.5
+    if (grounded) airTime.current = 0
+    else airTime.current += delta
+
+    // --- RAGDOLL TRIGGER (fall) ---
+    if (
+      !isRagdoll.current &&
+      (airTime.current > FALL_AIRTIME || linvel.y < FALL_VEL_Y) &&
+      pos.y > -20
+    ) {
+      isRagdoll.current = true
+      ragdollStartT.current = now
+      settleStartT.current = 0
+      body.current.setEnabledRotations(true, true, true, true)
+      const spin = 14 * scale
+      body.current.applyTorqueImpulse(
+        {
+          x: (Math.random() - 0.5) * spin,
+          y: (Math.random() - 0.5) * spin,
+          z: (Math.random() - 0.5) * spin,
+        },
+        true
+      )
+    }
+
+    // --- RAGDOLL RECOVERY ---
+    if (isRagdoll.current) {
+      const totalSpeed = Math.hypot(linvel.x, linvel.y, linvel.z)
+      if (totalSpeed < 0.6 && grounded) {
+        if (settleStartT.current === 0) settleStartT.current = now
+        if (
+          now - settleStartT.current > RAGDOLL_SETTLE_TIME &&
+          now - ragdollStartT.current > RAGDOLL_MIN_DURATION
+        ) {
+          // Recover
+          isRagdoll.current = false
+          settleStartT.current = 0
+          body.current.setEnabledRotations(false, false, false, true)
+          body.current.setRotation(
+            {
+              x: 0,
+              y: Math.sin(currentYaw.current / 2),
+              z: 0,
+              w: Math.cos(currentYaw.current / 2),
+            },
+            true
+          )
+          // Bump up slightly to avoid clipping
+          body.current.setTranslation(
+            { x: pos.x, y: pos.y + 0.4 * scale, z: pos.z },
+            true
+          )
+        }
+      } else {
+        settleStartT.current = 0
+      }
+    }
+
+    // ---------------------------------
+    // INPUT HANDLING (skipped during ragdoll)
+    // ---------------------------------
     const raw = rawInput.current.set(0, 0, 0)
-    if (keys.forward) raw.z -= 1
-    if (keys.backward) raw.z += 1
-    if (keys.left) raw.x -= 1
-    if (keys.right) raw.x += 1
-    if (Math.abs(mobileMove.x) > DEADZONE) raw.x += mobileMove.x
-    if (Math.abs(mobileMove.y) > DEADZONE) raw.z += mobileMove.y
-    if (raw.lengthSq() > 1) raw.normalize()
+    if (!isRagdoll.current) {
+      if (keys.forward) raw.z -= 1
+      if (keys.backward) raw.z += 1
+      if (keys.left) raw.x -= 1
+      if (keys.right) raw.x += 1
+      if (Math.abs(mobileMove.x) > DEADZONE) raw.x += mobileMove.x
+      if (Math.abs(mobileMove.y) > DEADZONE) raw.z += mobileMove.y
+      if (raw.lengthSq() > 1) raw.normalize()
+    }
 
-    // Smooth input
     smoothInput.current.lerp(raw, 1 - Math.exp(-INPUT_SMOOTH * delta))
     const si = smoothInput.current
     const moveMag = si.length()
 
-    // Apply velocity — big characters step proportionally further
-    const speed = BASE_SPEED * speedMult * Math.pow(scale, 0.45)
-    const linvel = body.current.linvel()
-    body.current.setLinvel(
-      { x: si.x * speed, y: linvel.y, z: si.z * speed },
-      true
-    )
+    if (!isRagdoll.current) {
+      const speed = BASE_SPEED * speedMult * Math.pow(scale, 0.45)
+      body.current.setLinvel(
+        { x: si.x * speed, y: linvel.y, z: si.z * speed },
+        true
+      )
 
-    // Grounded detection (velocity-based)
-    const grounded = Math.abs(linvel.y) < 0.5
-    if (grounded) {
-      airTime.current = 0
-      groundedTime.current += delta
-    } else {
-      airTime.current += delta
-      groundedTime.current = 0
+      if ((keys.jump || mobileJump) && grounded) {
+        const mass = body.current.mass()
+        body.current.applyImpulse(
+          { x: 0, y: JUMP * mass * Math.pow(scale, 0.55), z: 0 },
+          true
+        )
+      }
+
+      if (raw.lengthSq() > 0.01) {
+        targetYaw.current = Math.atan2(raw.x, raw.z)
+      }
+      currentYaw.current = lerpAngle(
+        currentYaw.current,
+        targetYaw.current,
+        1 - Math.exp(-ROT_SMOOTH * delta)
+      )
+
+      // ---- ATTACK (rising edge detection) ----
+      const attackHeld = keys.attack || mobileAttack
+      const attackEdge = attackHeld && !wasAttackPressed.current
+      wasAttackPressed.current = attackHeld
+
+      if (attackEdge && now - lastAttackT.current > 0.35) {
+        const dxS = pos.x - SAFE_ZONE.center[0]
+        const dzS = pos.z - SAFE_ZONE.center[2]
+        const inSafe = Math.hypot(dxS, dzS) < SAFE_ZONE.radius
+        if (!inSafe) {
+          lastAttackT.current = now
+          attackProgress.current = 0
+
+          const fwdX = Math.sin(currentYaw.current)
+          const fwdZ = Math.cos(currentYaw.current)
+          const hitRange = 3.5 * scale
+          const hitForce = 22 * scale
+
+          let hits = 0
+          for (const c of getCreatures()) {
+            const cp = c.getPos()
+            if (!cp) continue
+            const dx = cp.x - pos.x
+            const dz = cp.z - pos.z
+            const dist = Math.hypot(dx, dz)
+            if (dist > hitRange || dist < 0.1) continue
+            const nx = dx / dist
+            const nz = dz / dist
+            const dot = nx * fwdX + nz * fwdZ
+            if (dot < 0.35) continue
+            c.takeHit([nx * hitForce, 9 * scale, nz * hitForce])
+            hits++
+          }
+          if (hits > 0) useGameStore.getState().incrementHitCount()
+        }
+      }
     }
 
-    // Jump — scaled for character size
-    if ((keys.jump || mobileJump) && grounded) {
-      const mass = body.current.mass()
-      const jumpImpulse = JUMP * mass * Math.pow(scale, 0.55)
-      body.current.applyImpulse({ x: 0, y: jumpImpulse, z: 0 }, true)
+    // Tick attack animation progress
+    if (attackProgress.current >= 0) {
+      attackProgress.current += delta / 0.28
+      if (attackProgress.current >= 1) attackProgress.current = -1
     }
 
-    // Facing direction (yaw)
-    if (raw.lengthSq() > 0.01) {
-      targetYaw.current = Math.atan2(raw.x, raw.z)
-    }
-    currentYaw.current = lerpAngle(
-      currentYaw.current,
-      targetYaw.current,
-      1 - Math.exp(-ROT_SMOOTH * delta)
-    )
-
-    // Body tilt — lean into direction (forward when moving, lateral on turns)
-    const targetTiltX = -moveMag * 0.18 // forward lean
-    const targetTiltZ = 0 // could add lateral tilt on turn, keep simple
-    currentTilt.current.x = MathUtils.damp(
-      currentTilt.current.x,
-      targetTiltX,
-      8,
-      delta
-    )
-    currentTilt.current.z = MathUtils.damp(
-      currentTilt.current.z,
-      targetTiltZ,
-      8,
-      delta
-    )
-
-    // Walk cycle (legs + arms swing in opposition)
-    walkPhase.current += delta * WALK_HZ * moveMag
-    const walkAmp = moveMag * 0.85
-    const swing = Math.sin(walkPhase.current) * walkAmp
-
-    // Body bob
-    bodyBob.current = Math.abs(Math.sin(walkPhase.current)) * 0.06 * moveMag
-
-    // Apply animations
-    const air = Math.min(1, airTime.current * 2)
+    // --- ANIMATION / VISUALS ---
+    // Camera
+    const camHeight = 6 + scale * 1.2
+    const camBack = 12 + scale * 1.8
+    camDesired.current.set(pos.x, pos.y + camHeight, pos.z + camBack)
+    state.camera.position.lerp(camDesired.current, 1 - Math.exp(-6 * delta))
+    camLookAt.current.set(pos.x, pos.y + 1.2 * scale, pos.z)
+    camCurrentLook.current.lerp(camLookAt.current, 1 - Math.exp(-10 * delta))
+    state.camera.lookAt(camCurrentLook.current)
 
     if (visualRoot.current) {
-      visualRoot.current.rotation.y = currentYaw.current
+      if (isRagdoll.current) {
+        // In ragdoll, rotation is controlled by physics — don't override
+        visualRoot.current.rotation.set(0, 0, 0) // physics will rotate via body
+      } else {
+        visualRoot.current.rotation.y = currentYaw.current
+      }
       visualRoot.current.scale.setScalar(scale)
     }
 
+    const air = Math.min(1, airTime.current * 2)
+
+    // Body tilt
+    if (!isRagdoll.current) {
+      const targetTiltX = -moveMag * 0.18
+      currentTilt.current.x = MathUtils.damp(
+        currentTilt.current.x,
+        targetTiltX,
+        8,
+        delta
+      )
+    }
     if (tiltGroup.current) {
-      // Body leans forward when moving; tumbles when in air
       tiltGroup.current.rotation.x = MathUtils.lerp(
         currentTilt.current.x,
-        -airTime.current * 1.5,
+        -airTime.current * 1.2,
         air * 0.4
       )
       tiltGroup.current.rotation.z = currentTilt.current.z
-      tiltGroup.current.position.y = bodyBob.current
+      tiltGroup.current.position.y = isRagdoll.current ? 0 : bodyBob.current
     }
 
+    // Walk cycle
+    walkPhase.current += delta * WALK_HZ * moveMag
+    const walkAmp = moveMag * 0.85
+    const swing = Math.sin(walkPhase.current) * walkAmp
+    bodyBob.current = Math.abs(Math.sin(walkPhase.current)) * 0.06 * moveMag
+
     if (headPivot.current) {
-      // Head bobs opposite to body, gentle nod
-      headPivot.current.rotation.x = -bodyBob.current * 2 + air * 0.3
-      headPivot.current.rotation.z = Math.sin(walkPhase.current * 0.5) * 0.06 * moveMag
+      headPivot.current.rotation.x = isRagdoll.current
+        ? Math.sin(now * 7) * 0.3
+        : -bodyBob.current * 2 + air * 0.3
+      headPivot.current.rotation.z = isRagdoll.current
+        ? Math.cos(now * 5) * 0.3
+        : Math.sin(walkPhase.current * 0.5) * 0.06 * moveMag
     }
 
     if (bodyPivot.current) {
       bodyPivot.current.rotation.y = Math.sin(walkPhase.current) * 0.12 * moveMag
     }
 
-    // Legs swing opposite
+    // Legs
     if (leftLeg.current && rightLeg.current) {
-      if (air > 0.3) {
-        leftLeg.current.rotation.x = MathUtils.lerp(leftLeg.current.rotation.x, -0.8 + air * 0.4, 0.2)
-        rightLeg.current.rotation.x = MathUtils.lerp(rightLeg.current.rotation.x, -0.8 - air * 0.3, 0.2)
+      if (isRagdoll.current) {
+        leftLeg.current.rotation.x = Math.sin(now * 9) * 1.2
+        leftLeg.current.rotation.z = Math.cos(now * 7) * 0.5
+        rightLeg.current.rotation.x = Math.cos(now * 8) * 1.2
+        rightLeg.current.rotation.z = Math.sin(now * 6) * 0.5
+      } else if (air > 0.3) {
+        leftLeg.current.rotation.x = MathUtils.lerp(
+          leftLeg.current.rotation.x,
+          -0.8 + air * 0.4,
+          0.2
+        )
+        rightLeg.current.rotation.x = MathUtils.lerp(
+          rightLeg.current.rotation.x,
+          -0.8 - air * 0.3,
+          0.2
+        )
       } else {
         leftLeg.current.rotation.x = swing
+        leftLeg.current.rotation.z = 0
         rightLeg.current.rotation.x = -swing
+        rightLeg.current.rotation.z = 0
       }
     }
 
-    // Arms swing opposite to legs
+    // Arms — attack animation has priority on right arm
     if (leftArm.current && rightArm.current) {
-      if (air > 0.3) {
-        // Air: arms flail upward
-        leftArm.current.rotation.z = MathUtils.lerp(leftArm.current.rotation.z, 1.4 + Math.sin(airTime.current * 8) * 0.3, 0.15)
-        rightArm.current.rotation.z = MathUtils.lerp(rightArm.current.rotation.z, -1.4 - Math.sin(airTime.current * 7) * 0.3, 0.15)
+      if (isRagdoll.current) {
+        leftArm.current.rotation.x = Math.cos(now * 8 + 1) * 1.3
+        leftArm.current.rotation.z = 1.2 + Math.sin(now * 6) * 0.6
+        rightArm.current.rotation.x = Math.sin(now * 9) * 1.3
+        rightArm.current.rotation.z = -1.2 - Math.cos(now * 7) * 0.6
+      } else if (attackProgress.current >= 0) {
+        const p = attackProgress.current
+        const swingAmp = p < 0.5 ? p * 2 : 2 - p * 2
+        rightArm.current.rotation.x = -swingAmp * 2.4
+        rightArm.current.rotation.z = -0.3 + swingAmp * 1.1
+        // Left arm keeps walking
+        leftArm.current.rotation.x = -swing * 0.9
+        leftArm.current.rotation.z = 0.3
+      } else if (air > 0.3) {
+        leftArm.current.rotation.z = MathUtils.lerp(
+          leftArm.current.rotation.z,
+          1.4 + Math.sin(airTime.current * 8) * 0.3,
+          0.15
+        )
+        rightArm.current.rotation.z = MathUtils.lerp(
+          rightArm.current.rotation.z,
+          -1.4 - Math.sin(airTime.current * 7) * 0.3,
+          0.15
+        )
         leftArm.current.rotation.x = Math.sin(airTime.current * 6) * 0.4
         rightArm.current.rotation.x = Math.cos(airTime.current * 5) * 0.4
       } else {
         leftArm.current.rotation.x = -swing * 0.9
         rightArm.current.rotation.x = swing * 0.9
-        leftArm.current.rotation.z = MathUtils.lerp(leftArm.current.rotation.z, 0.3, 0.2)
-        rightArm.current.rotation.z = MathUtils.lerp(rightArm.current.rotation.z, -0.3, 0.2)
+        leftArm.current.rotation.z = MathUtils.lerp(
+          leftArm.current.rotation.z,
+          0.3,
+          0.2
+        )
+        rightArm.current.rotation.z = MathUtils.lerp(
+          rightArm.current.rotation.z,
+          -0.3,
+          0.2
+        )
       }
     }
 
-    // Third-person camera — scales with character size
-    const pos = body.current.translation()
-    const camHeight = 6 + scale * 1.2
-    const camBack = 12 + scale * 1.8
-    camDesired.current.set(pos.x, pos.y + camHeight, pos.z + camBack)
-    state.camera.position.lerp(camDesired.current, 1 - Math.exp(-6 * delta))
-
-    camLookAt.current.set(pos.x, pos.y + 1.2 * scale, pos.z)
-    camCurrentLook.current.lerp(camLookAt.current, 1 - Math.exp(-10 * delta))
-    state.camera.lookAt(camCurrentLook.current)
-
-    // Respawn
-    if (pos.y < -30) {
+    // Respawn fail-safe
+    if (pos.y < -40) {
       body.current.setTranslation({ x: 0, y: 5, z: 0 }, true)
       body.current.setLinvel({ x: 0, y: 0, z: 0 }, true)
+      body.current.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true)
+      body.current.setEnabledRotations(false, false, false, true)
+      isRagdoll.current = false
+      settleStartT.current = 0
       smoothInput.current.set(0, 0, 0)
     }
   })
 
-  // Big characters can't fit inside narrow gaps — scale affects physics
   const colliderHalfH = 0.5 * scale
   const colliderRadius = 0.55 * scale
 
@@ -220,16 +377,13 @@ export default function Player() {
     >
       <CapsuleCollider args={[colliderHalfH, colliderRadius]} friction={1.2} />
       <group ref={visualRoot}>
-        <group ref={tiltGroup} position={[0, 0, 0]}>
-          {/* Body (torso) */}
+        <group ref={tiltGroup}>
           <group ref={bodyPivot}>
             <mesh position={[0, -0.1, 0]} castShadow>
               <capsuleGeometry args={[0.45, 0.5, 6, 12]} />
               <meshToonMaterial color="#ef476f" />
             </mesh>
           </group>
-
-          {/* Head with face */}
           <group ref={headPivot} position={[0, 0.65, 0]}>
             <mesh position={[0, 0.15, 0]} castShadow>
               <sphereGeometry args={[0.7, 18, 18]} />
@@ -243,7 +397,6 @@ export default function Player() {
               <sphereGeometry args={[0.12, 10, 10]} />
               <meshBasicMaterial color="#1a1a1a" />
             </mesh>
-            {/* White eye highlights */}
             <mesh position={[0.28, 0.3, 0.66]}>
               <sphereGeometry args={[0.04, 8, 8]} />
               <meshBasicMaterial color="#ffffff" />
@@ -252,30 +405,23 @@ export default function Player() {
               <sphereGeometry args={[0.04, 8, 8]} />
               <meshBasicMaterial color="#ffffff" />
             </mesh>
-            {/* Smile */}
             <mesh position={[0, -0.05, 0.62]} rotation={[0.2, 0, 0]}>
               <torusGeometry args={[0.22, 0.05, 6, 14, Math.PI]} />
               <meshBasicMaterial color="#b23a48" />
             </mesh>
           </group>
-
-          {/* Left arm — pivot at shoulder */}
           <group ref={leftArm} position={[0.55, 0.25, 0]}>
             <mesh position={[0, -0.25, 0]} rotation={[0, 0, 0.3]} castShadow>
               <capsuleGeometry args={[0.13, 0.4, 6, 10]} />
               <meshToonMaterial color="#ef476f" />
             </mesh>
           </group>
-
-          {/* Right arm */}
           <group ref={rightArm} position={[-0.55, 0.25, 0]}>
             <mesh position={[0, -0.25, 0]} rotation={[0, 0, -0.3]} castShadow>
               <capsuleGeometry args={[0.13, 0.4, 6, 10]} />
               <meshToonMaterial color="#ef476f" />
             </mesh>
           </group>
-
-          {/* Left leg — pivot at hip */}
           <group ref={leftLeg} position={[0.22, -0.5, 0]}>
             <mesh position={[0, -0.3, 0]} castShadow>
               <cylinderGeometry args={[0.18, 0.22, 0.5, 10]} />
@@ -286,8 +432,6 @@ export default function Player() {
               <meshToonMaterial color="#1a1a1a" />
             </mesh>
           </group>
-
-          {/* Right leg */}
           <group ref={rightLeg} position={[-0.22, -0.5, 0]}>
             <mesh position={[0, -0.3, 0]} castShadow>
               <cylinderGeometry args={[0.18, 0.22, 0.5, 10]} />
