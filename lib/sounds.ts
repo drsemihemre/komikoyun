@@ -207,3 +207,164 @@ export function playDamage() {
   osc.start()
   osc.stop(c.currentTime + 0.18)
 }
+
+// ─── Müzik sistemi: prosedürel ambient loop ───
+// Basit 4-akor progresyonu: C-G-Am-F (dört doğallı, pozitif his)
+// Her akor 8 vuruş (yaklaşık 5sn), toplam loop 32 vuruş
+
+let musicPlaying = false
+let musicStartT = 0
+let nextBeatT = 0
+let musicLoopId: number | undefined
+let musicGain: GainNode | null = null
+
+const BPM = 84
+const BEAT = 60 / BPM
+
+type Chord = { root: number; third: number; fifth: number; seventh: number }
+
+const CHORDS: Chord[] = [
+  { root: 60, third: 64, fifth: 67, seventh: 71 }, // Cmaj7
+  { root: 67, third: 71, fifth: 74, seventh: 77 }, // Gmaj7
+  { root: 69, third: 72, fifth: 76, seventh: 79 }, // Amin7
+  { root: 65, third: 69, fifth: 72, seventh: 76 }, // Fmaj7
+]
+
+const midiToFreq = (m: number) => 440 * Math.pow(2, (m - 69) / 12)
+
+function musicEnvelope(
+  c: AudioContext,
+  freq: number,
+  startAt: number,
+  duration: number,
+  type: OscillatorType,
+  peakGain: number
+) {
+  const osc = c.createOscillator()
+  osc.type = type
+  osc.frequency.value = freq
+
+  const g = c.createGain()
+  const attack = Math.min(0.05, duration * 0.2)
+  const release = Math.min(0.3, duration * 0.4)
+  g.gain.setValueAtTime(0, startAt)
+  g.gain.linearRampToValueAtTime(peakGain, startAt + attack)
+  g.gain.setValueAtTime(peakGain, startAt + duration - release)
+  g.gain.exponentialRampToValueAtTime(
+    Math.max(0.0001, peakGain * 0.001),
+    startAt + duration
+  )
+
+  osc.connect(g)
+  g.connect(musicGain ?? c.destination)
+  osc.start(startAt)
+  osc.stop(startAt + duration + 0.02)
+}
+
+function scheduleBeat(beatIndex: number, time: number) {
+  const c = getCtx()
+  if (!c) return
+
+  const chordIdx = Math.floor(beatIndex / 8) % CHORDS.length
+  const chord = CHORDS[chordIdx]
+  const beatInChord = beatIndex % 8
+
+  // Bass — kökü her 4 vuruşta
+  if (beatInChord === 0 || beatInChord === 4) {
+    musicEnvelope(
+      c,
+      midiToFreq(chord.root - 12),
+      time,
+      BEAT * 3.5,
+      'sine',
+      0.14
+    )
+  }
+
+  // Pad — akor notaları, 8 vuruş boyunca sustain (her akor)
+  if (beatInChord === 0) {
+    musicEnvelope(c, midiToFreq(chord.root), time, BEAT * 8, 'sine', 0.035)
+    musicEnvelope(c, midiToFreq(chord.third), time, BEAT * 8, 'sine', 0.03)
+    musicEnvelope(c, midiToFreq(chord.fifth), time, BEAT * 8, 'sine', 0.03)
+  }
+
+  // Melody — beats 1, 3, 5, 7 (offbeat)
+  if (beatInChord % 2 === 1) {
+    const notes = [
+      chord.root + 12,
+      chord.third + 12,
+      chord.fifth + 12,
+      chord.seventh + 12,
+    ]
+    const note = notes[Math.floor(pseudoRand(beatIndex * 31) * notes.length)]
+    musicEnvelope(c, midiToFreq(note), time, BEAT * 1.4, 'triangle', 0.05)
+  }
+
+  // Occasional sparkle (every 16 beats)
+  if (beatIndex % 16 === 8) {
+    musicEnvelope(
+      c,
+      midiToFreq(chord.root + 24),
+      time,
+      BEAT * 2,
+      'sine',
+      0.03
+    )
+  }
+}
+
+function pseudoRand(seed: number) {
+  const x = Math.sin(seed * 12.9898 + 78.233) * 43758.5453
+  return x - Math.floor(x)
+}
+
+function musicTick() {
+  if (!musicPlaying) return
+  const c = getCtx()
+  if (!c) return
+  while (nextBeatT < c.currentTime + 0.3) {
+    const beatIndex = Math.round((nextBeatT - musicStartT) / BEAT)
+    scheduleBeat(beatIndex, nextBeatT)
+    nextBeatT += BEAT
+  }
+  musicLoopId = window.setTimeout(musicTick, 60)
+}
+
+export function startMusic() {
+  if (musicPlaying) return
+  const c = getCtx()
+  if (!c) return
+  if (!musicGain) {
+    musicGain = c.createGain()
+    musicGain.gain.value = 0.8
+    musicGain.connect(masterGain ?? c.destination)
+  }
+  musicPlaying = true
+  musicStartT = c.currentTime + 0.15
+  nextBeatT = musicStartT
+  musicTick()
+}
+
+export function stopMusic() {
+  musicPlaying = false
+  if (musicLoopId !== undefined) {
+    clearTimeout(musicLoopId)
+    musicLoopId = undefined
+  }
+}
+
+export function setMusicEnabled(on: boolean) {
+  if (!musicGain) return
+  musicGain.gain.value = on ? 0.8 : 0
+}
+
+let musicEnabledFlag = true
+export function toggleMusic() {
+  musicEnabledFlag = !musicEnabledFlag
+  setMusicEnabled(musicEnabledFlag)
+  return musicEnabledFlag
+}
+
+export function isMusicEnabled() {
+  return musicEnabledFlag
+}

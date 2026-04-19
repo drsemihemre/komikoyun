@@ -13,6 +13,7 @@ import MobileJoystick from '../ui/MobileJoystick'
 import PotionInventory from '../ui/PotionInventory'
 import { useGameStore } from '@/lib/store'
 import { getPlayerPos } from '@/lib/playerHandle'
+import { startMusic } from '@/lib/sounds'
 
 const controlKeys = [
   { name: 'forward', keys: ['ArrowUp', 'w', 'W'] },
@@ -54,6 +55,19 @@ export default function Game() {
     setIsMobile(mobile)
     setDpr(mobile ? [1, 1.25] : [1, 1.6])
   }, [setIsMobile])
+
+  // Müziği ilk kullanıcı etkileşiminde başlat (tarayıcı gereksinimi)
+  useEffect(() => {
+    const start = () => startMusic()
+    document.addEventListener('pointerdown', start, { once: true })
+    document.addEventListener('keydown', start, { once: true })
+    document.addEventListener('touchstart', start, { once: true })
+    return () => {
+      document.removeEventListener('pointerdown', start)
+      document.removeEventListener('keydown', start)
+      document.removeEventListener('touchstart', start)
+    }
+  }, [])
 
   return (
     <div className="relative h-screen w-screen select-none overflow-hidden">

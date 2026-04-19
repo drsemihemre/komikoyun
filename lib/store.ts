@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { loadStats, saveStats } from './highScore'
 
 type Vec2 = { x: number; y: number }
 
@@ -19,6 +20,7 @@ type GameState = {
   hitCount: number
   koCount: number
   score: number
+  highScore: number
   playerHP: number
   // Camera
   cameraMode: CameraMode
@@ -48,6 +50,20 @@ const SPEED_MAX = 3.5
 
 export const PLAYER_HP_MAX = 100
 
+const initialStats = loadStats()
+
+function persistIfHigh(score: number, hitCount: number, koCount: number) {
+  const cur = loadStats()
+  const patch: Record<string, number> = {
+    totalHits: cur.totalHits + 1,
+    totalKos: cur.totalKos,
+  }
+  if (score > cur.highScore) patch.highScore = score
+  saveStats(patch)
+  void hitCount
+  void koCount
+}
+
 export const useGameStore = create<GameState>((set) => ({
   mobileMove: { x: 0, y: 0 },
   mobileJump: false,
@@ -59,6 +75,7 @@ export const useGameStore = create<GameState>((set) => ({
   hitCount: 0,
   koCount: 0,
   score: 0,
+  highScore: initialStats.highScore,
   playerHP: PLAYER_HP_MAX,
   cameraMode: 'third',
 
@@ -102,9 +119,38 @@ export const useGameStore = create<GameState>((set) => ({
     }),
 
   incrementHitCount: () =>
-    set((s) => ({ hitCount: s.hitCount + 1, score: s.score + 10 })),
-  addKo: () => set((s) => ({ koCount: s.koCount + 1, score: s.score + 50 })),
-  addScore: (amount) => set((s) => ({ score: s.score + amount })),
+    set((s) => {
+      const newScore = s.score + 10
+      const newHigh = Math.max(s.highScore, newScore)
+      if (newHigh > s.highScore) {
+        persistIfHigh(newScore, s.hitCount + 1, s.koCount)
+      } else {
+        saveStats({ totalHits: loadStats().totalHits + 1 })
+      }
+      return {
+        hitCount: s.hitCount + 1,
+        score: newScore,
+        highScore: newHigh,
+      }
+    }),
+  addKo: () =>
+    set((s) => {
+      const newScore = s.score + 50
+      const newHigh = Math.max(s.highScore, newScore)
+      const cur = loadStats()
+      saveStats({
+        totalKos: cur.totalKos + 1,
+        highScore: newHigh,
+      })
+      return { koCount: s.koCount + 1, score: newScore, highScore: newHigh }
+    }),
+  addScore: (amount) =>
+    set((s) => {
+      const newScore = s.score + amount
+      const newHigh = Math.max(s.highScore, newScore)
+      if (newHigh > s.highScore) saveStats({ highScore: newHigh })
+      return { score: newScore, highScore: newHigh }
+    }),
   damagePlayer: (amount) =>
     set((s) => ({ playerHP: Math.max(0, s.playerHP - amount) })),
   healPlayer: (amount) =>

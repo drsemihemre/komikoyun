@@ -2,19 +2,23 @@
 
 import { useEffect, useState } from 'react'
 import { useGameStore, PLAYER_HP_MAX } from '@/lib/store'
-import { setMuted, isMuted } from '@/lib/sounds'
+import { setMuted, isMuted, toggleMusic, isMusicEnabled } from '@/lib/sounds'
 
 export default function HUD() {
   const isMobile = useGameStore((s) => s.isMobile)
   const hitCount = useGameStore((s) => s.hitCount)
   const koCount = useGameStore((s) => s.koCount)
   const score = useGameStore((s) => s.score)
+  const highScore = useGameStore((s) => s.highScore)
   const playerHP = useGameStore((s) => s.playerHP)
   const cameraMode = useGameStore((s) => s.cameraMode)
   const toggleCamera = useGameStore((s) => s.toggleCamera)
 
   const [pointerLocked, setPointerLocked] = useState(false)
   const [muted, setMutedLocal] = useState(false)
+  const [musicOn, setMusicOn] = useState(true)
+  const [showCongrats, setShowCongrats] = useState(false)
+  const [lastHighCheck, setLastHighCheck] = useState(0)
 
   useEffect(() => {
     const onChange = () => setPointerLocked(!!document.pointerLockElement)
@@ -24,7 +28,23 @@ export default function HUD() {
 
   useEffect(() => {
     setMutedLocal(isMuted())
+    setMusicOn(isMusicEnabled())
   }, [])
+
+  // Yeni high score!
+  useEffect(() => {
+    if (
+      score > 0 &&
+      score === highScore &&
+      score > lastHighCheck &&
+      score - lastHighCheck >= 20
+    ) {
+      setShowCongrats(true)
+      setLastHighCheck(score)
+      const t = setTimeout(() => setShowCongrats(false), 2000)
+      return () => clearTimeout(t)
+    }
+  }, [score, highScore, lastHighCheck])
 
   const hpPct = Math.max(0, Math.min(100, (playerHP / PLAYER_HP_MAX) * 100))
   const hpColor =
@@ -33,6 +53,8 @@ export default function HUD() {
       : hpPct > 30
         ? 'from-yellow-400 to-orange-500'
         : 'from-red-500 to-rose-700'
+
+  const isNewHigh = score > 0 && score === highScore
 
   const onCameraToggle = () => {
     const next = cameraMode === 'third' ? 'first' : 'third'
@@ -50,12 +72,17 @@ export default function HUD() {
     setMutedLocal(next)
   }
 
+  const onMusicToggle = () => {
+    const on = toggleMusic()
+    setMusicOn(on)
+  }
+
   return (
     <div className="pointer-events-none absolute inset-0 select-none">
       {!isMobile && (
         <div className="absolute left-4 top-4 rounded-xl bg-black/40 px-4 py-2 text-white shadow-lg backdrop-blur-sm">
           <div className="text-lg font-black tracking-wide">KOMİK OYUN</div>
-          <div className="mt-1 text-xs opacity-80">Faz 8 · İçerik</div>
+          <div className="mt-1 text-xs opacity-80">Faz 9 · Arena & Müzik</div>
         </div>
       )}
 
@@ -79,16 +106,25 @@ export default function HUD() {
         </div>
       </div>
 
-      {/* Score panel + buttons (top right) */}
+      {/* Score + high score + buttons (top right) */}
       <div className="absolute right-4 top-4 flex items-start gap-2">
         <div className="flex flex-col rounded-xl bg-black/40 px-3 py-2 text-white shadow-lg backdrop-blur-sm">
           <div className="flex items-center gap-3">
             <span className="text-2xl">🌟</span>
-            <span className="text-2xl font-black tabular-nums">{score}</span>
+            <span
+              className={`text-2xl font-black tabular-nums ${isNewHigh ? 'text-yellow-300' : ''}`}
+            >
+              {score}
+            </span>
           </div>
-          <div className="mt-0.5 flex gap-3 text-[11px] opacity-80">
-            <span>👊 {hitCount}</span>
-            <span>💥 {koCount}</span>
+          <div className="mt-0.5 flex items-center justify-between gap-3 text-[11px] opacity-80">
+            <div className="flex gap-3">
+              <span>👊 {hitCount}</span>
+              <span>💥 {koCount}</span>
+            </div>
+            <span className="text-yellow-300 font-semibold">
+              🏆 {highScore}
+            </span>
           </div>
         </div>
         <button
@@ -98,9 +134,20 @@ export default function HUD() {
             onCameraToggle()
           }}
           className="pointer-events-auto flex h-11 w-11 items-center justify-center rounded-xl bg-black/40 text-xl text-white shadow-lg backdrop-blur-sm transition hover:bg-black/60 active:scale-95"
-          title={cameraMode === 'third' ? 'FPV moduna geç' : 'Üçüncü şahıs moduna geç'}
+          title={cameraMode === 'third' ? 'FPV' : '3. şahıs'}
         >
           {cameraMode === 'third' ? '👁️' : '🎥'}
+        </button>
+        <button
+          onClick={onMusicToggle}
+          onTouchStart={(e) => {
+            e.preventDefault()
+            onMusicToggle()
+          }}
+          className="pointer-events-auto flex h-11 w-11 items-center justify-center rounded-xl bg-black/40 text-xl text-white shadow-lg backdrop-blur-sm transition hover:bg-black/60 active:scale-95"
+          title={musicOn ? 'Müzik kapat' : 'Müzik aç'}
+        >
+          {musicOn ? '🎵' : '🎶'}
         </button>
         <button
           onClick={onMuteToggle}
@@ -114,6 +161,14 @@ export default function HUD() {
           {muted ? '🔇' : '🔊'}
         </button>
       </div>
+
+      {/* New high score toast */}
+      {showCongrats && (
+        <div className="pointer-events-none absolute left-1/2 top-32 -translate-x-1/2 rounded-2xl bg-gradient-to-r from-yellow-400 to-orange-500 px-6 py-3 text-center text-white shadow-2xl animate-pulse">
+          <div className="text-xl font-black">🏆 YENİ REKOR!</div>
+          <div className="text-sm font-bold">{score} puan</div>
+        </div>
+      )}
 
       {/* FPV crosshair */}
       {cameraMode === 'first' && (
