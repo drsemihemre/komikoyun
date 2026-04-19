@@ -24,6 +24,7 @@ import MarioPipes from './MarioPipes'
 import Residents from './Residents'
 import SkyTraffic from './SkyTraffic'
 import DriveableKart from './DriveableKart'
+import RemotePlayers from './RemotePlayers'
 import { useGameStore } from '@/lib/store'
 
 export default function World() {
@@ -54,6 +55,7 @@ export default function World() {
       <DriveableKart />
       <SpiralStairs position={[-16, 0, -4]} height={16} />
       <HitParticles />
+      <RemotePlayers />
     </>
   )
 }

@@ -62,11 +62,24 @@ function ResidentFigure({ resident }: { resident: Resident }) {
   const atHome = useRef(true)
   const currentYaw = useRef(0)
 
+  const wasDay = useRef(true)
+
   useFrame((state, delta) => {
     if (!groupRef.current) return
     const now = state.clock.elapsedTime
     const hour = getGameHour()
     const goHome = hour < 7 || hour > 18
+    const isDay = !goHome
+
+    // Day/night transition → immediate target refresh
+    if (isDay !== wasDay.current) {
+      wasDay.current = isDay
+      nextTargetAt.current = now
+      atHome.current = false
+    }
+
+    // Ensure atHome is false during day (safety)
+    if (isDay && atHome.current) atHome.current = false
 
     // Target selection
     if (now > nextTargetAt.current) {

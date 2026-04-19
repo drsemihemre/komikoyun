@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef } from 'react'
+import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import type { PointLight } from 'three'
 import Creature, { type CreatureVariant } from './Creature'
@@ -10,13 +10,25 @@ type Spawn = {
   id: string
   offset: [number, number]
   variant: CreatureVariant
+  nocturnal?: boolean
 }
+
+// Oyuncu boyutuna yakın (1:1), tank 2x
+// Not: player mesh ~1.5-1.8m, creature size=1 → ~1.2m. Yaklaşık eşitlemek için size=1.5
+const BASE_SIZE = 1.5
+const TANK_SIZE = 3.0
 
 const CREATURES: Spawn[] = [
   {
     id: 'c1',
     offset: [5, 0],
-    variant: { shape: 'round', color: '#f06292', hp: 1, speed: 2.5, size: 1 },
+    variant: {
+      shape: 'round',
+      color: '#f06292',
+      hp: 1,
+      speed: 2.5,
+      size: BASE_SIZE,
+    },
   },
   {
     id: 'c2',
@@ -27,7 +39,7 @@ const CREATURES: Spawn[] = [
       accentColor: '#0d47a1',
       hp: 2,
       speed: 2.3,
-      size: 1.05,
+      size: BASE_SIZE * 1.05,
     },
   },
   {
@@ -39,7 +51,7 @@ const CREATURES: Spawn[] = [
       accentColor: '#1b5e20',
       hp: 1,
       speed: 3.2,
-      size: 0.85,
+      size: BASE_SIZE * 0.85,
     },
   },
   {
@@ -51,7 +63,7 @@ const CREATURES: Spawn[] = [
       accentColor: '#5d4037',
       hp: 3,
       speed: 1.6,
-      size: 1.45,
+      size: TANK_SIZE,
     },
   },
   {
@@ -63,7 +75,7 @@ const CREATURES: Spawn[] = [
       accentColor: '#4a148c',
       hp: 2,
       speed: 2.4,
-      size: 1,
+      size: BASE_SIZE,
     },
   },
   {
@@ -75,15 +87,66 @@ const CREATURES: Spawn[] = [
       accentColor: '#bf360c',
       hp: 1,
       speed: 3,
-      size: 0.9,
+      size: BASE_SIZE * 0.9,
     },
   },
   {
     id: 'c7',
     offset: [7, 4],
-    variant: { shape: 'round', color: '#4dd0e1', hp: 1, speed: 2.6, size: 1 },
+    variant: {
+      shape: 'round',
+      color: '#4dd0e1',
+      hp: 1,
+      speed: 2.6,
+      size: BASE_SIZE,
+    },
   },
 ]
+
+// Gece spesifik yaratıklar — 28 adet (toplam 7+28=35, yaklaşık 5×)
+const NOCTURNAL_COLORS = [
+  '#ef4444',
+  '#f97316',
+  '#8b5cf6',
+  '#06b6d4',
+  '#10b981',
+  '#eab308',
+  '#ec4899',
+  '#14b8a6',
+]
+const NOCTURNAL_SHAPES = ['round', 'horned', 'jumper'] as const
+
+function generateNocturnal(): Spawn[] {
+  let seed = 4321
+  const rand = () => {
+    seed = (seed * 9301 + 49297) % 233280
+    return seed / 233280
+  }
+  const list: Spawn[] = []
+  for (let i = 0; i < 28; i++) {
+    const ang = (i / 28) * Math.PI * 2
+    const r = 3 + rand() * (ARENA.radius - 4)
+    const shape = NOCTURNAL_SHAPES[Math.floor(rand() * NOCTURNAL_SHAPES.length)]
+    const color = NOCTURNAL_COLORS[Math.floor(rand() * NOCTURNAL_COLORS.length)]
+    const hp = shape === 'horned' ? 2 : 1
+    const speed = shape === 'jumper' ? 2.8 + rand() * 0.8 : 2.2 + rand() * 0.8
+    const size = BASE_SIZE * (0.8 + rand() * 0.45)
+    list.push({
+      id: `n${i}`,
+      offset: [Math.cos(ang) * r, Math.sin(ang) * r],
+      variant: {
+        shape,
+        color,
+        accentColor: '#1a1a1a',
+        hp,
+        speed,
+        size,
+      },
+      nocturnal: true,
+    })
+  }
+  return list
+}
 
 const FENCE_POSTS = 18
 const FENCE_RADIUS = ARENA.radius + 0.3
@@ -92,11 +155,19 @@ const STANDS_INNER_R = ARENA.radius + 1.2
 const STANDS_OUTER_R = ARENA.radius + 6.5
 const STANDS_TIERS = 3
 
-const FLAG_COLORS = ['#ef476f', '#06d6a0', '#ffd166', '#118ab2', '#f4a261', '#c77dff']
+const FLAG_COLORS = [
+  '#ef476f',
+  '#06d6a0',
+  '#ffd166',
+  '#118ab2',
+  '#f4a261',
+  '#c77dff',
+]
 const LIGHT_COLORS = ['#ff006e', '#8338ec', '#ffbe0b', '#3a86ff']
 
 export default function Arena() {
   const [cx, , cz] = ARENA.center
+  const nocturnal = useMemo(() => generateNocturnal(), [])
 
   return (
     <>
@@ -109,38 +180,41 @@ export default function Arena() {
         <circleGeometry args={[ARENA.radius, 48]} />
         <meshToonMaterial color="#f3d2f3" />
       </mesh>
-      {/* Outer ring */}
       <mesh position={[cx, 0.025, cz]} rotation={[-Math.PI / 2, 0, 0]}>
         <ringGeometry args={[ARENA.radius - 0.5, ARENA.radius, 48]} />
         <meshBasicMaterial color="#7b2cbf" />
       </mesh>
-      {/* Center decoration */}
       <mesh position={[cx, 0.05, cz]} rotation={[-Math.PI / 2, 0, 0]}>
         <ringGeometry args={[0.5, 1.2, 6]} />
         <meshBasicMaterial color="#7b2cbf" />
       </mesh>
 
-      {/* Fence posts + flags */}
       <Fence cx={cx} cz={cz} />
-
-      {/* Stands */}
       <Stands cx={cx} cz={cz} />
-
-      {/* Light poles */}
       <LightPoles cx={cx} cz={cz} />
-
-      {/* Entrance banner */}
       <Banner cx={cx} cz={cz + ARENA.radius + 1.5} />
 
-      {/* Creatures */}
       {CREATURES.map((c) => (
         <Creature
           key={c.id}
           id={c.id}
-          spawn={[cx + c.offset[0], 1.2, cz + c.offset[1]]}
+          spawn={[cx + c.offset[0], 1.5, cz + c.offset[1]]}
           arenaCenter={[cx, 0, cz]}
           arenaRadius={ARENA.radius}
           variant={c.variant}
+        />
+      ))}
+
+      {/* Nocturnal — sadece gece görünür, baştan havuz olarak yüklü */}
+      {nocturnal.map((c) => (
+        <Creature
+          key={c.id}
+          id={c.id}
+          spawn={[cx + c.offset[0], 1.5, cz + c.offset[1]]}
+          arenaCenter={[cx, 0, cz]}
+          arenaRadius={ARENA.radius}
+          variant={c.variant}
+          nocturnal={c.nocturnal}
         />
       ))}
     </>
@@ -153,7 +227,6 @@ function Fence({ cx, cz }: { cx: number; cz: number }) {
   const flags = []
   for (let i = 0; i < FENCE_POSTS; i++) {
     const angle = (i / FENCE_POSTS) * Math.PI * 2
-    // Leave entrance (south-facing, around angle π/2 which is +z)
     const isEntrance = angle > Math.PI * 0.45 && angle < Math.PI * 0.55
     if (isEntrance) continue
 
@@ -161,17 +234,12 @@ function Fence({ cx, cz }: { cx: number; cz: number }) {
     const z = cz + Math.sin(angle) * FENCE_RADIUS
 
     posts.push(
-      <mesh
-        key={`p${i}`}
-        position={[x, FENCE_HEIGHT / 2, z]}
-        castShadow
-      >
+      <mesh key={`p${i}`} position={[x, FENCE_HEIGHT / 2, z]} castShadow>
         <cylinderGeometry args={[0.12, 0.15, FENCE_HEIGHT, 8]} />
         <meshToonMaterial color="#6f4518" />
       </mesh>
     )
 
-    // Flag on top
     const flagColor = FLAG_COLORS[i % FLAG_COLORS.length]
     flags.push(
       <mesh
@@ -185,7 +253,6 @@ function Fence({ cx, cz }: { cx: number; cz: number }) {
       </mesh>
     )
 
-    // Horizontal bar to next post
     const nextI = (i + 1) % FENCE_POSTS
     const nextAngle = (nextI / FENCE_POSTS) * Math.PI * 2
     const nextIsEntrance =
@@ -222,10 +289,8 @@ function Fence({ cx, cz }: { cx: number; cz: number }) {
 function Stands({ cx, cz }: { cx: number; cz: number }) {
   const elements = []
   const SEGMENTS = 28
-  // Cover 3/4 of circumference (leave south entrance open)
   for (let i = 0; i < SEGMENTS; i++) {
     const t = i / SEGMENTS
-    // Skip front 1/4 (south-facing entrance)
     if (t > 0.4 && t < 0.6) continue
     const angle = t * Math.PI * 2
     const cosA = Math.cos(angle)
@@ -233,15 +298,16 @@ function Stands({ cx, cz }: { cx: number; cz: number }) {
 
     for (let tier = 0; tier < STANDS_TIERS; tier++) {
       const tierR =
-        STANDS_INNER_R + (tier + 0.5) * ((STANDS_OUTER_R - STANDS_INNER_R) / STANDS_TIERS)
+        STANDS_INNER_R +
+        (tier + 0.5) * ((STANDS_OUTER_R - STANDS_INNER_R) / STANDS_TIERS)
       const tierW = (STANDS_OUTER_R - STANDS_INNER_R) / STANDS_TIERS
       const tierH = 0.5 + tier * 0.7
       const x = cx + cosA * tierR
       const z = cz + sinA * tierR
-      // Size of each segment piece
       const segWidth = (2 * Math.PI * tierR) / SEGMENTS
 
-      const tierColor = tier === 0 ? '#c77dff' : tier === 1 ? '#9d4edd' : '#7b2cbf'
+      const tierColor =
+        tier === 0 ? '#c77dff' : tier === 1 ? '#9d4edd' : '#7b2cbf'
 
       elements.push(
         <mesh
@@ -261,7 +327,6 @@ function Stands({ cx, cz }: { cx: number; cz: number }) {
 }
 
 function LightPoles({ cx, cz }: { cx: number; cz: number }) {
-  // 4 köşe direği
   const positions: [number, number, string][] = [
     [cx + STANDS_OUTER_R + 1, cz - STANDS_OUTER_R - 1, LIGHT_COLORS[0]],
     [cx - STANDS_OUTER_R - 1, cz - STANDS_OUTER_R - 1, LIGHT_COLORS[1]],
@@ -307,29 +372,25 @@ function LightPole({
 
   useFrame((state) => {
     if (lightRef.current) {
-      // Gentle flicker
-      lightRef.current.intensity = 4 + Math.sin(state.clock.elapsedTime * 3 + x) * 0.3
+      lightRef.current.intensity =
+        4 + Math.sin(state.clock.elapsedTime * 3 + x) * 0.3
     }
   })
 
   return (
     <group position={[x, 0, z]} rotation={[0, yaw, 0]}>
-      {/* Pole */}
       <mesh position={[0, POLE_H / 2, 0]} castShadow>
         <cylinderGeometry args={[0.2, 0.25, POLE_H, 8]} />
         <meshToonMaterial color="#2b2d42" />
       </mesh>
-      {/* Arm toward arena */}
       <mesh position={[0, POLE_H, 1]} castShadow>
         <boxGeometry args={[0.3, 0.3, 2]} />
         <meshToonMaterial color="#2b2d42" />
       </mesh>
-      {/* Lamp housing */}
       <mesh position={[0, POLE_H, 2]} castShadow>
         <boxGeometry args={[1.3, 0.8, 0.8]} />
         <meshToonMaterial color="#495057" />
       </mesh>
-      {/* Emissive bulb */}
       <mesh position={[0, POLE_H - 0.25, 2.3]}>
         <sphereGeometry args={[0.35, 12, 12]} />
         <meshStandardMaterial
@@ -339,7 +400,6 @@ function LightPole({
           toneMapped={false}
         />
       </mesh>
-      {/* Real point light on 2 poles only (perf) */}
       {withLight && (
         <pointLight
           ref={lightRef}
@@ -357,7 +417,6 @@ function LightPole({
 function Banner({ cx, cz }: { cx: number; cz: number }) {
   return (
     <group position={[cx, 0, cz]}>
-      {/* Two posts */}
       <mesh position={[-4, 2.5, 0]} castShadow>
         <cylinderGeometry args={[0.18, 0.22, 5, 8]} />
         <meshToonMaterial color="#6f4518" />
@@ -366,17 +425,14 @@ function Banner({ cx, cz }: { cx: number; cz: number }) {
         <cylinderGeometry args={[0.18, 0.22, 5, 8]} />
         <meshToonMaterial color="#6f4518" />
       </mesh>
-      {/* Top banner */}
       <mesh position={[0, 4.2, 0]} castShadow>
         <boxGeometry args={[8.5, 1.4, 0.3]} />
         <meshToonMaterial color="#ef476f" />
       </mesh>
-      {/* Inner accent */}
       <mesh position={[0, 4.2, 0.2]}>
         <boxGeometry args={[8, 1, 0.1]} />
         <meshBasicMaterial color="#ffd166" />
       </mesh>
-      {/* Little flag hanging */}
       <mesh position={[0, 3.3, 0.25]} rotation={[0, 0, 0]}>
         <boxGeometry args={[1.5, 0.8, 0.05]} />
         <meshToonMaterial color="#7b2cbf" />

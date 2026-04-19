@@ -1,0 +1,5 @@
+{
+  "name": "komikoyun-mp",
+  "main": "partyserver/party.ts",
+  "compatibilityDate": "2025-11-01"
+}

@@ -184,24 +184,6 @@ export default function Mosque() {
           <meshToonMaterial color="#8d6e63" />
         </mesh>
 
-        {/* Namaz kılan figürler — secde ve rüku pozlarında, mihraba dönük */}
-        {/* 3 saf, her safda 2 kişi */}
-        {[
-          { x: -3, z: 1.5, pose: 'sujood' },
-          { x: -1, z: 1.5, pose: 'sujood' },
-          { x: 1, z: 1.5, pose: 'ruku' },
-          { x: 3, z: 1.5, pose: 'ruku' },
-          { x: -2, z: 3, pose: 'stand' },
-          { x: 0, z: 3, pose: 'stand' },
-          { x: 2, z: 3, pose: 'stand' },
-        ].map((p, i) => (
-          <PrayingFigure
-            key={`pr${i}`}
-            x={p.x}
-            z={p.z}
-            pose={p.pose as 'sujood' | 'ruku' | 'stand'}
-          />
-        ))}
 
         {/* Minareler */}
         {minaretOffsets.map((off, i) => (
@@ -224,96 +206,6 @@ export default function Mosque() {
       <mesh position={[0, 1.5, 13.15]}>
         <boxGeometry args={[3.7, 0.9, 0.05]} />
         <meshBasicMaterial color="#ffd60a" />
-      </mesh>
-    </group>
-  )
-}
-
-function PrayingFigure({
-  x,
-  z,
-  pose,
-}: {
-  x: number
-  z: number
-  pose: 'sujood' | 'ruku' | 'stand'
-}) {
-  // Mihraba dönük (mihrap batıda yani -x yönünde)
-  // Stand: dik ayakta, ruku: belden eğik, sujood: secde (alın yerde)
-  const robeColor = '#ede8d0'
-  const turbanColor = '#f0ead2'
-
-  if (pose === 'sujood') {
-    return (
-      <group position={[x, 0, z]} rotation={[0, Math.PI / 2, 0]}>
-        {/* Gövde — secde, neredeyse yerde */}
-        <mesh position={[0.3, 0.25, 0]} rotation={[0, 0, 0]} castShadow>
-          <boxGeometry args={[0.8, 0.4, 0.5]} />
-          <meshToonMaterial color={robeColor} />
-        </mesh>
-        {/* Kafa — alın yerde */}
-        <mesh position={[0.8, 0.18, 0]} castShadow>
-          <sphereGeometry args={[0.2, 12, 12]} />
-          <meshToonMaterial color={turbanColor} />
-        </mesh>
-        {/* Arka (oturmuş) */}
-        <mesh position={[-0.15, 0.25, 0]} castShadow>
-          <boxGeometry args={[0.4, 0.45, 0.5]} />
-          <meshToonMaterial color={robeColor} />
-        </mesh>
-      </group>
-    )
-  }
-
-  if (pose === 'ruku') {
-    return (
-      <group position={[x, 0, z]} rotation={[0, Math.PI / 2, 0]}>
-        {/* Bacaklar */}
-        <mesh position={[0, 0.4, 0]} castShadow>
-          <boxGeometry args={[0.4, 0.8, 0.4]} />
-          <meshToonMaterial color={robeColor} />
-        </mesh>
-        {/* Gövde eğik — horizontal */}
-        <mesh
-          position={[0.3, 0.95, 0]}
-          rotation={[0, 0, -Math.PI / 2.3]}
-          castShadow
-        >
-          <capsuleGeometry args={[0.22, 0.5, 6, 10]} />
-          <meshToonMaterial color={robeColor} />
-        </mesh>
-        {/* Kafa öne eğik */}
-        <mesh position={[0.75, 0.85, 0]} castShadow>
-          <sphereGeometry args={[0.2, 12, 12]} />
-          <meshToonMaterial color={turbanColor} />
-        </mesh>
-      </group>
-    )
-  }
-
-  // stand
-  return (
-    <group position={[x, 0, z]} rotation={[0, Math.PI / 2, 0]}>
-      <mesh position={[0, 0.7, 0]} castShadow>
-        <capsuleGeometry args={[0.25, 1.1, 6, 10]} />
-        <meshToonMaterial color={robeColor} />
-      </mesh>
-      <mesh position={[0, 1.55, 0]} castShadow>
-        <sphereGeometry args={[0.22, 14, 14]} />
-        <meshToonMaterial color="#ffd89c" />
-      </mesh>
-      <mesh position={[0, 1.72, 0]} castShadow>
-        <cylinderGeometry args={[0.24, 0.24, 0.14, 14]} />
-        <meshToonMaterial color={turbanColor} />
-      </mesh>
-      {/* Katlanmış eller — göbek hizası */}
-      <mesh position={[0.2, 0.9, 0]} rotation={[0, 0, 0.9]} castShadow>
-        <capsuleGeometry args={[0.07, 0.3, 5, 8]} />
-        <meshToonMaterial color={robeColor} />
-      </mesh>
-      <mesh position={[-0.2, 0.9, 0]} rotation={[0, 0, -0.9]} castShadow>
-        <capsuleGeometry args={[0.07, 0.3, 5, 8]} />
-        <meshToonMaterial color={robeColor} />
       </mesh>
     </group>
   )

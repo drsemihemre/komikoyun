@@ -16,6 +16,7 @@ import {
 import { getPlayerHandle } from '@/lib/playerHandle'
 import { useGameStore, MAP_HALF } from '@/lib/store'
 import { playKo } from '@/lib/sounds'
+import { getGameHour } from './DayNightCycle'
 
 export type CreatureShape = 'round' | 'horned' | 'jumper' | 'tank'
 
@@ -34,6 +35,7 @@ type Props = {
   arenaCenter: [number, number, number]
   arenaRadius: number
   variant: CreatureVariant
+  nocturnal?: boolean // true: sadece gece aktif
 }
 
 const ATTACK_RANGE_BASE = 1.6
@@ -53,6 +55,7 @@ export default function Creature({
   arenaCenter,
   arenaRadius,
   variant,
+  nocturnal = false,
 }: Props) {
   const body = useRef<RapierRigidBody>(null)
   const visualGroup = useRef<Group>(null)
@@ -161,6 +164,42 @@ export default function Creature({
   useFrame((state, delta) => {
     if (!body.current) return
     const now = state.clock.elapsedTime
+
+    // Day/night kontrolü
+    const hour = getGameHour()
+    const isNight = hour < 7 || hour > 18
+    const canLeaveArena = isNight // gece arenadan çıkabilirler
+
+    // Nocturnal davranış: gündüz gizle + pause
+    if (nocturnal) {
+      if (!isNight) {
+        if (visualGroup.current) visualGroup.current.visible = false
+        const pos = body.current.translation()
+        if (pos.y > -30) {
+          body.current.setTranslation({ x: pos.x, y: -60, z: pos.z }, true)
+          body.current.setLinvel({ x: 0, y: 0, z: 0 }, true)
+        }
+        return
+      } else {
+        if (visualGroup.current) visualGroup.current.visible = true
+        const pos = body.current.translation()
+        if (pos.y < -20) {
+          // Just came from the depths → spawn in arena
+          const ang = Math.random() * Math.PI * 2
+          const r = Math.random() * (arenaRadius - 2)
+          body.current.setTranslation(
+            {
+              x: arenaCenter[0] + Math.cos(ang) * r,
+              y: 2,
+              z: arenaCenter[2] + Math.sin(ang) * r,
+            },
+            true
+          )
+          body.current.setLinvel({ x: 0, y: 0, z: 0 }, true)
+          hp.current = variant.hp
+        }
+      }
+    }
 
     // --- Special state animations ---
     if (specialState.current === 'melting') {
@@ -321,6 +360,28 @@ export default function Creature({
     }
 
     const pos = body.current.translation()
+
+    // Gündüz: çok uzaklaştılarsa arenaya geri ışınla
+    if (!canLeaveArena) {
+      const ax = pos.x - arenaCenter[0]
+      const az = pos.z - arenaCenter[2]
+      const dc = Math.hypot(ax, az)
+      if (dc > arenaRadius + 6) {
+        const ang = Math.random() * Math.PI * 2
+        const r = Math.random() * (arenaRadius - 3)
+        body.current.setTranslation(
+          {
+            x: arenaCenter[0] + Math.cos(ang) * r,
+            y: 2,
+            z: arenaCenter[2] + Math.sin(ang) * r,
+          },
+          true
+        )
+        body.current.setLinvel({ x: 0, y: 0, z: 0 }, true)
+        return
+      }
+    }
+
     const player = getPlayerHandle()
     const playerPos = player?.getPos()
     const playerDown = player?.isDown() ?? true
@@ -405,7 +466,8 @@ export default function Creature({
       const ax = pos.x - arenaCenter[0]
       const az = pos.z - arenaCenter[2]
       const dc = Math.hypot(ax, az)
-      if (dc > arenaRadius - 1.5) {
+      // Gündüz arena sınırına zorla, gece serbest roam
+      if (!canLeaveArena && dc > arenaRadius - 1.5) {
         targetDir.current.set(-ax, 0, -az).normalize()
         changeDirAt.current = now + 2
       }

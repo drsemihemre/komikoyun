@@ -27,6 +27,7 @@ import {
 import { spawnImpact } from '@/lib/particles'
 import { TELEPORT_POINTS } from './SurprisePotions'
 import { getWeapon, type WeaponId } from '@/lib/weapons'
+import { sendState } from '@/lib/multiplayer'
 
 const BASE_SPEED = 10
 const JUMP = 13
@@ -840,6 +841,17 @@ export default function Player() {
         )
       }
     }
+
+    // Multiplayer: state'i sunucuya gönder (80ms throttled)
+    sendState({
+      x: pos.x,
+      y: pos.y,
+      z: pos.z,
+      yaw: currentYaw.current,
+      scale: scale,
+      hp: useGameStore.getState().playerHP,
+      currentWeapon: useGameStore.getState().currentWeapon,
+    })
 
     // Fail-safe
     if (pos.y < -45) {

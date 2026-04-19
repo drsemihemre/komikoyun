@@ -51,18 +51,25 @@ function sunPositionFromGameTime(): [number, number, number] {
   return [sunX, sunY, 30]
 }
 
-// Ezan — gün doğumu ve gün batımında bir kere oynar
+// Ezan — gerçek ses kaydı (Wikimedia Commons: Adhan_wiki.oga by Jarih, CC BY-SA 3.0)
+// Yerel kopyalar: /adhan.oga (Chrome/FF), /adhan.mp3 (Safari fallback)
+let ezanAudio: HTMLAudioElement | null = null
+
 function playEzan() {
   if (typeof window === 'undefined') return
-  if (!window.speechSynthesis) return
   try {
-    window.speechSynthesis.cancel()
-    const utt = new SpeechSynthesisUtterance('Allahu ekber, Allahu ekber')
-    utt.lang = 'ar-SA'
-    utt.rate = 0.6
-    utt.pitch = 0.85
-    utt.volume = 0.9
-    window.speechSynthesis.speak(utt)
+    if (!ezanAudio) {
+      ezanAudio = new Audio()
+      // OGG (Chrome/Firefox/Edge native)
+      const canOgg = ezanAudio.canPlayType('audio/ogg').length > 0
+      ezanAudio.src = canOgg ? '/adhan.oga' : '/adhan.mp3'
+      ezanAudio.preload = 'auto'
+      ezanAudio.volume = 0.7
+    }
+    ezanAudio.currentTime = 0
+    void ezanAudio.play().catch(() => {
+      // ignore autoplay block
+    })
   } catch {
     // ignore
   }

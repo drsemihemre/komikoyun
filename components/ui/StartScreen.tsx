@@ -1,18 +1,29 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { useGameStore } from '@/lib/store'
 import { startMusic } from '@/lib/sounds'
+import { loadNickname, saveNickname } from '@/lib/nickname'
+import { connect } from '@/lib/multiplayer'
 
 export default function StartScreen() {
   const gameStarted = useGameStore((s) => s.gameStarted)
   const setGameStarted = useGameStore((s) => s.setGameStarted)
   const isMobile = useGameStore((s) => s.isMobile)
   const highScore = useGameStore((s) => s.highScore)
+  const [nickname, setNickname] = useState('')
+
+  useEffect(() => {
+    setNickname(loadNickname())
+  }, [])
 
   if (gameStarted) return null
 
   const onStart = () => {
+    const final = nickname.trim().slice(0, 20) || `Oyuncu${Math.floor(Math.random() * 1000)}`
+    saveNickname(final)
     startMusic()
+    connect(final, 'public')
     setGameStarted(true)
   }
 
@@ -24,7 +35,7 @@ export default function StartScreen() {
           KOMİK OYUN
         </h1>
         <div className="mt-2 text-lg font-semibold text-white/90 md:text-xl">
-          Ragdoll fizik macerası
+          Ragdoll fizik macerası · 🎮 Multiplayer
         </div>
 
         {highScore > 0 && (
@@ -33,13 +44,30 @@ export default function StartScreen() {
           </div>
         )}
 
+        <div className="mt-6 flex flex-col items-center gap-2">
+          <label className="text-sm font-semibold text-white/90">
+            Takma adın
+          </label>
+          <input
+            type="text"
+            value={nickname}
+            onChange={(e) => setNickname(e.target.value)}
+            placeholder="Ör. Mehmet"
+            maxLength={20}
+            className="w-64 rounded-xl border-2 border-white/40 bg-white/90 px-4 py-3 text-center text-lg font-bold text-slate-800 outline-none placeholder:text-slate-400 focus:border-yellow-400"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') onStart()
+            }}
+          />
+        </div>
+
         <button
           onClick={onStart}
           onTouchStart={(e) => {
             e.preventDefault()
             onStart()
           }}
-          className="mt-8 rounded-2xl bg-gradient-to-br from-orange-400 to-pink-500 px-12 py-5 text-2xl font-black text-white shadow-2xl transition hover:scale-105 hover:from-orange-300 hover:to-pink-400 active:scale-95 md:text-3xl"
+          className="mt-6 rounded-2xl bg-gradient-to-br from-orange-400 to-pink-500 px-12 py-5 text-2xl font-black text-white shadow-2xl transition hover:scale-105 hover:from-orange-300 hover:to-pink-400 active:scale-95 md:text-3xl"
         >
           ▶ BAŞLA
         </button>
@@ -55,12 +83,17 @@ export default function StartScreen() {
               <div>
                 <span className="font-bold">WASD</span> yürü ·{' '}
                 <span className="font-bold">Space</span> zıpla ·{' '}
-                <span className="font-bold">F/Q</span> vur 👊
+                <span className="font-bold">F/Q</span> yumruk 👊 ·{' '}
+                <span className="font-bold">R</span> silah
               </div>
               <div className="mt-1">
                 <span className="font-bold">V</span> kamera ·{' '}
+                <span className="font-bold">X</span> silah değiştir ·{' '}
                 <span className="font-bold">1-4</span> iksir ·{' '}
                 <span className="font-bold">ESC</span> durdur
+              </div>
+              <div className="mt-1 text-[10px] opacity-60">
+                Ezan sesi: &quot;Adhan wiki&quot; by Jarih, CC BY-SA 3.0
               </div>
             </>
           )}

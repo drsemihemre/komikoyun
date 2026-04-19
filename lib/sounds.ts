@@ -747,8 +747,8 @@ export function startMusic() {
   if (!musicGain) {
     // Müzik zinciri: dry + reverb tail + delay feedback
     musicGain = c.createGain()
-    // Silah sesleri için daha da kısık (önceki 0.3 → 0.1, yaklaşık 1/3)
-    musicGain.gain.value = 0.1
+    // Silah sesleri daha da net duyulsun (0.1 → 0.05, yarı)
+    musicGain.gain.value = 0.05
     musicGain.connect(masterGain ?? c.destination)
 
     // Reverb
@@ -789,7 +789,7 @@ export function stopMusic() {
 
 export function setMusicEnabled(on: boolean) {
   if (!musicGain) return
-  musicGain.gain.value = on ? 0.1 : 0
+  musicGain.gain.value = on ? 0.05 : 0
 }
 
 let musicEnabledFlag = true
