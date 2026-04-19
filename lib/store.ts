@@ -22,12 +22,13 @@ type GameState = {
   resetPotions: () => void
 }
 
-const SCALE_STEP = 0.12
-const SCALE_MIN = 0.35
-const SCALE_MAX = 2.8
-const SPEED_STEP = 0.12
-const SPEED_MIN = 0.35
-const SPEED_MAX = 2.4
+// Multiplicative progression — büyüyüp küçülmek daha akıcı
+const SCALE_FACTOR = 1.12
+const SCALE_MIN = 0.25
+const SCALE_MAX = 12 // ~4× önceki max
+const SPEED_FACTOR = 1.1
+const SPEED_MIN = 0.3
+const SPEED_MAX = 3.5
 
 export const useGameStore = create<GameState>((set) => ({
   mobileMove: { x: 0, y: 0 },
@@ -47,22 +48,22 @@ export const useGameStore = create<GameState>((set) => ({
       switch (p) {
         case 'grow':
           return {
-            scale: Math.min(SCALE_MAX, state.scale + SCALE_STEP),
+            scale: Math.min(SCALE_MAX, state.scale * SCALE_FACTOR),
             potionHits: hits,
           }
         case 'shrink':
           return {
-            scale: Math.max(SCALE_MIN, state.scale - SCALE_STEP),
+            scale: Math.max(SCALE_MIN, state.scale / SCALE_FACTOR),
             potionHits: hits,
           }
         case 'speed':
           return {
-            speedMult: Math.min(SPEED_MAX, state.speedMult + SPEED_STEP),
+            speedMult: Math.min(SPEED_MAX, state.speedMult * SPEED_FACTOR),
             potionHits: hits,
           }
         case 'slow':
           return {
-            speedMult: Math.max(SPEED_MIN, state.speedMult - SPEED_STEP),
+            speedMult: Math.max(SPEED_MIN, state.speedMult / SPEED_FACTOR),
             potionHits: hits,
           }
       }

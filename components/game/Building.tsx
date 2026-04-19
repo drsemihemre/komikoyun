@@ -5,15 +5,17 @@ type Props = {
   height: number
 }
 
-const WIDTH = 10
-const DEPTH = 8
-const FLOOR_H = 4
+// Daha sığ eğim için FLOOR_H düşük, DEPTH uzun, WIDTH geniş
+const WIDTH = 12
+const DEPTH = 12
+const FLOOR_H = 3
 const WALL_T = 0.3
+const STAIR_INSET = 0.8 // rampa uçlarının duvarlara göre boşluğu
 
 export default function Building({ position, height }: Props) {
   const floors = Math.max(2, Math.floor(height / FLOOR_H))
 
-  const ramps: React.ReactNode[] = []
+  const rampColliders: React.ReactNode[] = []
   const platformColliders: React.ReactNode[] = []
   const stepVisuals: React.ReactNode[] = []
   const platformVisuals: React.ReactNode[] = []
@@ -22,7 +24,7 @@ export default function Building({ position, height }: Props) {
     const leftSide = f % 2 === 0
     const yBase = f * FLOOR_H
 
-    // Floor platform (skip ground)
+    // Kat platformu (yer hariç)
     if (f > 0) {
       const pz = leftSide ? DEPTH / 4 : -DEPTH / 4
       platformColliders.push(
@@ -30,23 +32,20 @@ export default function Building({ position, height }: Props) {
           key={`pc${f}`}
           args={[(WIDTH - 0.6) / 2, 0.12, (DEPTH / 2 - 0.3) / 2]}
           position={[0, yBase, pz]}
+          friction={1.5}
         />
       )
       platformVisuals.push(
-        <mesh
-          key={`pv${f}`}
-          position={[0, yBase, pz]}
-          receiveShadow
-        >
+        <mesh key={`pv${f}`} position={[0, yBase, pz]} receiveShadow>
           <boxGeometry args={[WIDTH - 0.6, 0.24, DEPTH / 2 - 0.3]} />
           <meshToonMaterial color="#ffe5b4" />
         </mesh>
       )
     }
 
-    // Flight from f → f+1 (ramp + visual steps on top)
+    // f katından f+1'e rampa
     if (f < floors - 1) {
-      const zStart = leftSide ? -DEPTH / 2 + 0.6 : DEPTH / 2 - 0.6
+      const zStart = leftSide ? -DEPTH / 2 + STAIR_INSET : DEPTH / 2 - STAIR_INSET
       const zEnd = -zStart
       const xPos = leftSide ? -WIDTH / 4 : WIDTH / 4
       const dz = zEnd - zStart
@@ -54,20 +53,21 @@ export default function Building({ position, height }: Props) {
       const length = Math.sqrt(dy * dy + dz * dz)
       const rotX = -Math.atan2(dy, dz)
       const midY = yBase + dy / 2
-      const rampWidth = WIDTH / 2 - 0.6
+      const rampWidth = WIDTH / 2 - 0.8
 
-      // Invisible smooth ramp collider
-      ramps.push(
+      // Görünmez rampa collider (yüksek friction = kaymaz)
+      rampColliders.push(
         <CuboidCollider
           key={`rc${f}`}
           args={[rampWidth / 2, 0.15, length / 2]}
           position={[xPos, midY, 0]}
           rotation={[rotX, 0, 0]}
+          friction={2.5}
         />
       )
 
-      // Decorative step visuals (no physics) sitting on top of ramp
-      const STEP_COUNT = 14
+      // Dekoratif basamaklar (fiziksiz, rampa üstünde)
+      const STEP_COUNT = 18
       for (let s = 0; s < STEP_COUNT; s++) {
         const t = (s + 0.5) / STEP_COUNT
         const sx = xPos
@@ -79,7 +79,7 @@ export default function Building({ position, height }: Props) {
             position={[sx, sy, sz]}
             rotation={[rotX, 0, 0]}
           >
-            <boxGeometry args={[rampWidth, 0.18, length / STEP_COUNT]} />
+            <boxGeometry args={[rampWidth, 0.16, length / STEP_COUNT]} />
             <meshToonMaterial color={leftSide ? '#d4a373' : '#cdb4db'} />
           </mesh>
         )
@@ -90,7 +90,7 @@ export default function Building({ position, height }: Props) {
   return (
     <group position={position}>
       <RigidBody type="fixed" colliders={false}>
-        {/* Wall colliders */}
+        {/* Duvar collider'ları */}
         <CuboidCollider
           args={[WIDTH / 2, height / 2, WALL_T / 2]}
           position={[0, height / 2, -DEPTH / 2]}
@@ -103,15 +103,15 @@ export default function Building({ position, height }: Props) {
           args={[WALL_T / 2, height / 2, DEPTH / 2]}
           position={[WIDTH / 2, height / 2, 0]}
         />
-        {/* Roof collider */}
+        {/* Çatı */}
         <CuboidCollider
           args={[WIDTH / 2 + 0.2, 0.15, DEPTH / 2 + 0.2]}
           position={[0, height + 0.15, 0]}
         />
         {platformColliders}
-        {ramps}
+        {rampColliders}
 
-        {/* Wall visuals */}
+        {/* Duvar görselleri */}
         <mesh position={[0, height / 2, -DEPTH / 2]} receiveShadow>
           <boxGeometry args={[WIDTH, height, WALL_T]} />
           <meshToonMaterial color="#fce38a" />

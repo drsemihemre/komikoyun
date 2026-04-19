@@ -7,10 +7,13 @@ export default function HUD() {
 
   return (
     <div className="pointer-events-none absolute inset-0 select-none">
-      <div className="absolute left-4 top-4 rounded-xl bg-black/40 px-4 py-2 text-white shadow-lg backdrop-blur-sm">
-        <div className="text-lg font-black tracking-wide">KOMİK OYUN</div>
-        <div className="mt-1 text-xs opacity-80">Faz 2 · İksirler</div>
-      </div>
+      {/* Başlık — mobilde gizle, masaüstünde göster */}
+      {!isMobile && (
+        <div className="absolute left-4 top-4 rounded-xl bg-black/40 px-4 py-2 text-white shadow-lg backdrop-blur-sm">
+          <div className="text-lg font-black tracking-wide">KOMİK OYUN</div>
+          <div className="mt-1 text-xs opacity-80">Faz 3 · Ragdoll</div>
+        </div>
+      )}
 
       {!isMobile && (
         <div className="absolute bottom-4 left-4 rounded-xl bg-black/40 px-4 py-2 text-white shadow-lg backdrop-blur-sm">
@@ -20,7 +23,7 @@ export default function HUD() {
             <br />
             Space — Zıpla
             <br />
-            1 / 2 / 3 / 4 — İksir iç · 0 — Sıfırla
+            1 / 2 / 3 / 4 — İksir · 0 — Sıfırla
           </div>
         </div>
       )}

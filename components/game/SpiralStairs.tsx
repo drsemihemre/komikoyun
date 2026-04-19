@@ -5,9 +5,9 @@ type Props = {
   height: number
 }
 
-const RADIUS = 3.5
-const STEPS_PER_TURN = 28
-const STEP_RISE = 0.22
+const RADIUS = 4
+const STEPS_PER_TURN = 40
+const STEP_RISE = 0.14
 
 export default function SpiralStairs({ position, height }: Props) {
   const totalSteps = Math.floor(height / STEP_RISE)
@@ -17,7 +17,7 @@ export default function SpiralStairs({ position, height }: Props) {
     const phaseOffset = strand * Math.PI
     for (let i = 0; i < totalSteps; i++) {
       const angle = (i / STEPS_PER_TURN) * Math.PI * 2 + phaseOffset
-      const y = i * STEP_RISE + 0.15
+      const y = i * STEP_RISE + 0.18
       const x = Math.cos(angle) * RADIUS
       const z = Math.sin(angle) * RADIUS
       const color = strand === 0 ? '#a8dadc' : '#f1c0e8'
@@ -26,10 +26,10 @@ export default function SpiralStairs({ position, height }: Props) {
           key={`${strand}-${i}`}
           position={[x, y, z]}
           rotation={[0, -angle + Math.PI / 2, 0]}
-          castShadow={i % 3 === 0}
+          castShadow={i % 4 === 0}
           receiveShadow
         >
-          <boxGeometry args={[2.4, 0.3, 1.6]} />
+          <boxGeometry args={[2.8, 0.28, 1.8]} />
           <meshToonMaterial color={color} />
         </mesh>
       )
@@ -38,7 +38,7 @@ export default function SpiralStairs({ position, height }: Props) {
 
   return (
     <group position={position}>
-      <RigidBody type="fixed" colliders="cuboid">
+      <RigidBody type="fixed" colliders="cuboid" friction={2} restitution={0}>
         <mesh position={[0, height / 2, 0]} castShadow>
           <cylinderGeometry args={[0.35, 0.35, height, 12]} />
           <meshToonMaterial color="#457b9d" />
