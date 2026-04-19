@@ -14,6 +14,7 @@ export default function MobileJoystick() {
   const setMobileJump = useGameStore((s) => s.setMobileJump)
   const setMobileAttack = useGameStore((s) => s.setMobileAttack)
   const setMobileWeaponFire = useGameStore((s) => s.setMobileWeaponFire)
+  const setMobileCrouch = useGameStore((s) => s.setMobileCrouch)
   const cycleWeapon = useGameStore((s) => s.cycleWeapon)
   const currentWeapon = useGameStore((s) => s.currentWeapon)
 
@@ -166,6 +167,23 @@ export default function MobileJoystick() {
         title="Yumruk"
       >
         👊
+      </button>
+
+      {/* Crouch button — joystick'in üstünde sol alt */}
+      <button
+        className="absolute bottom-48 left-24 h-14 w-14 touch-none rounded-full border-4 border-white/80 bg-gradient-to-br from-slate-500 to-slate-700 text-xl font-black text-white shadow-2xl active:scale-95"
+        onTouchStart={(e) => {
+          e.preventDefault()
+          setMobileCrouch(true)
+        }}
+        onTouchEnd={(e) => {
+          e.preventDefault()
+          setMobileCrouch(false)
+        }}
+        onTouchCancel={() => setMobileCrouch(false)}
+        title="Eğil"
+      >
+        ⬇️
       </button>
 
       {/* Jump button */}

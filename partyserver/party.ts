@@ -1,7 +1,5 @@
 // PartyKit server — komikoyun multiplayer
-// Deploy: npx partykit deploy
-// Default room: her oyuncu bu odaya katılır
-// Client URL: https://komikoyun-mp.drsemihemre.partykit.dev
+// Features: player sync, leaderboard (top 5 by score), attack relay
 
 import type * as Party from 'partykit/server'
 
@@ -14,15 +12,16 @@ type PlayerState = {
   yaw: number
   scale: number
   hp: number
+  score: number
   currentWeapon: string
+  bodyColor: string
+  hatKind: string
+  hatColor: string
   lastSeen: number
 }
 
 type ClientMessage =
-  | {
-      type: 'join'
-      nickname: string
-    }
+  | { type: 'join'; nickname: string; bodyColor?: string; hatKind?: string; hatColor?: string }
   | {
       type: 'state'
       x: number
@@ -31,54 +30,67 @@ type ClientMessage =
       yaw: number
       scale: number
       hp: number
+      score: number
       currentWeapon: string
+      bodyColor?: string
+      hatKind?: string
+      hatColor?: string
     }
-  | {
-      type: 'action'
-      action: 'hit' | 'weapon' | 'potion'
-      target?: string
-    }
+  | { type: 'hit'; targetId: string; damage: number; knockX: number; knockY: number; knockZ: number }
+  | { type: 'action'; action: string; target?: string }
 
 type ServerMessage =
-  | {
-      type: 'welcome'
-      yourId: string
-      players: PlayerState[]
-    }
-  | {
-      type: 'player_joined'
-      player: PlayerState
-    }
-  | {
-      type: 'player_left'
-      id: string
-    }
+  | { type: 'welcome'; yourId: string; players: PlayerState[] }
+  | { type: 'player_joined'; player: PlayerState }
+  | { type: 'player_left'; id: string }
   | {
       type: 'states'
-      players: { id: string; x: number; y: number; z: number; yaw: number; scale: number; hp: number; currentWeapon: string }[]
+      players: {
+        id: string
+        x: number
+        y: number
+        z: number
+        yaw: number
+        scale: number
+        hp: number
+        score: number
+        currentWeapon: string
+        bodyColor: string
+        hatKind: string
+        hatColor: string
+      }[]
     }
   | {
-      type: 'action'
-      fromId: string
-      action: string
-      target?: string
+      type: 'leaderboard'
+      top: { id: string; nickname: string; score: number }[]
     }
+  | {
+      type: 'hit_you'
+      fromId: string
+      damage: number
+      knockX: number
+      knockY: number
+      knockZ: number
+    }
+  | { type: 'action'; fromId: string; action: string; target?: string }
 
 export default class KomikOyunParty implements Party.Server {
   players = new Map<string, PlayerState>()
   broadcastInterval: ReturnType<typeof setInterval> | null = null
+  leaderboardInterval: ReturnType<typeof setInterval> | null = null
 
   constructor(readonly room: Party.Room) {}
 
   onStart() {
-    // 100ms'de bir tüm pozisyonları broadcast et
     this.broadcastInterval = setInterval(() => {
       this.broadcastStates()
     }, 100)
+    this.leaderboardInterval = setInterval(() => {
+      this.broadcastLeaderboard()
+    }, 2000)
   }
 
   onConnect(conn: Party.Connection) {
-    // Initialize player state
     const player: PlayerState = {
       id: conn.id,
       nickname: 'Oyuncu',
@@ -88,18 +100,23 @@ export default class KomikOyunParty implements Party.Server {
       yaw: 0,
       scale: 1,
       hp: 100,
+      score: 0,
       currentWeapon: 'fist',
+      bodyColor: '#ef476f',
+      hatKind: 'none',
+      hatColor: '#1a1a1a',
       lastSeen: Date.now(),
     }
     this.players.set(conn.id, player)
 
-    // Send welcome with current roster
     const msg: ServerMessage = {
       type: 'welcome',
       yourId: conn.id,
       players: Array.from(this.players.values()),
     }
     conn.send(JSON.stringify(msg))
+    // Immediately send leaderboard
+    conn.send(JSON.stringify(this.buildLeaderboard()))
   }
 
   onMessage(message: string, sender: Party.Connection) {
@@ -115,6 +132,9 @@ export default class KomikOyunParty implements Party.Server {
 
     if (parsed.type === 'join') {
       player.nickname = (parsed.nickname || 'Oyuncu').slice(0, 20)
+      if (parsed.bodyColor) player.bodyColor = parsed.bodyColor
+      if (parsed.hatKind) player.hatKind = parsed.hatKind
+      if (parsed.hatColor) player.hatColor = parsed.hatColor
       this.room.broadcast(
         JSON.stringify({
           type: 'player_joined',
@@ -129,8 +149,26 @@ export default class KomikOyunParty implements Party.Server {
       player.yaw = parsed.yaw
       player.scale = parsed.scale
       player.hp = parsed.hp
+      player.score = parsed.score
       player.currentWeapon = parsed.currentWeapon
+      if (parsed.bodyColor) player.bodyColor = parsed.bodyColor
+      if (parsed.hatKind) player.hatKind = parsed.hatKind
+      if (parsed.hatColor) player.hatColor = parsed.hatColor
       player.lastSeen = Date.now()
+    } else if (parsed.type === 'hit') {
+      // Relay hit to the target
+      const targetConn = this.room.getConnection(parsed.targetId)
+      if (targetConn) {
+        const hitMsg: ServerMessage = {
+          type: 'hit_you',
+          fromId: sender.id,
+          damage: parsed.damage,
+          knockX: parsed.knockX,
+          knockY: parsed.knockY,
+          knockZ: parsed.knockZ,
+        }
+        targetConn.send(JSON.stringify(hitMsg))
+      }
     } else if (parsed.type === 'action') {
       this.room.broadcast(
         JSON.stringify({
@@ -166,9 +204,26 @@ export default class KomikOyunParty implements Party.Server {
         yaw: p.yaw,
         scale: p.scale,
         hp: p.hp,
+        score: p.score,
         currentWeapon: p.currentWeapon,
+        bodyColor: p.bodyColor,
+        hatKind: p.hatKind,
+        hatColor: p.hatColor,
       })),
     }
     this.room.broadcast(JSON.stringify(msg))
+  }
+
+  buildLeaderboard(): ServerMessage {
+    const top = Array.from(this.players.values())
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5)
+      .map((p) => ({ id: p.id, nickname: p.nickname, score: p.score }))
+    return { type: 'leaderboard', top }
+  }
+
+  broadcastLeaderboard() {
+    if (this.players.size < 1) return
+    this.room.broadcast(JSON.stringify(this.buildLeaderboard()))
   }
 }

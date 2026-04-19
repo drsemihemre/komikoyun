@@ -2,8 +2,6 @@
 
 import PartySocket from 'partysocket'
 
-// PartyKit server host. Boş ise multiplayer devre dışı (offline mode).
-// Deploy sonrası burası: 'komikoyun-mp.drsemihemre.partykit.dev' olacak
 export const PARTY_HOST =
   process.env.NEXT_PUBLIC_PARTY_HOST ||
   'komikoyun-mp.drsemihemre.partykit.dev'
@@ -17,7 +15,17 @@ export type RemotePlayer = {
   yaw: number
   scale: number
   hp: number
+  score: number
   currentWeapon: string
+  bodyColor: string
+  hatKind: string
+  hatColor: string
+}
+
+export type LeaderboardEntry = {
+  id: string
+  nickname: string
+  score: number
 }
 
 type WelcomeMsg = {
@@ -37,19 +45,31 @@ type LeftMsg = {
   type: 'player_left'
   id: string
 }
+type LeaderboardMsg = {
+  type: 'leaderboard'
+  top: LeaderboardEntry[]
+}
+type HitYouMsg = {
+  type: 'hit_you'
+  fromId: string
+  damage: number
+  knockX: number
+  knockY: number
+  knockZ: number
+}
 type ActionMsg = {
   type: 'action'
   fromId: string
   action: string
   target?: string
 }
-type ServerMsg = WelcomeMsg | StatesMsg | JoinedMsg | LeftMsg | ActionMsg
+type ServerMsg = WelcomeMsg | StatesMsg | JoinedMsg | LeftMsg | LeaderboardMsg | HitYouMsg | ActionMsg
 
-// Global MP state — non-Zustand to avoid re-rendering on every state update
 const remotes = new Map<string, RemotePlayer>()
 let myId: string | null = null
 let connected = false
 let socket: PartySocket | null = null
+let leaderboard: LeaderboardEntry[] = []
 const subscribers = new Set<() => void>()
 
 function notify() {
@@ -71,28 +91,56 @@ export function getMyId(): string | null {
   return myId
 }
 
+export function getLeaderboard(): LeaderboardEntry[] {
+  return leaderboard
+}
+
 export function isConnected(): boolean {
   return connected
 }
 
-export function connect(nickname: string, room = 'public') {
+// HitYou handler — Player tarafında register edilir
+type HitYouHandler = (
+  damage: number,
+  knockback: [number, number, number],
+  fromId: string
+) => void
+let hitHandler: HitYouHandler | null = null
+export function registerHitHandler(h: HitYouHandler) {
+  hitHandler = h
+}
+export function unregisterHitHandler() {
+  hitHandler = null
+}
+
+export function connect(
+  nickname: string,
+  room = 'public',
+  skin?: { bodyColor: string; hatKind: string; hatColor: string }
+) {
   if (socket) return
   if (!PARTY_HOST) return
   try {
-    socket = new PartySocket({
-      host: PARTY_HOST,
-      room,
-    })
+    socket = new PartySocket({ host: PARTY_HOST, room })
 
     socket.addEventListener('open', () => {
       connected = true
-      socket?.send(JSON.stringify({ type: 'join', nickname }))
+      socket?.send(
+        JSON.stringify({
+          type: 'join',
+          nickname,
+          bodyColor: skin?.bodyColor,
+          hatKind: skin?.hatKind,
+          hatColor: skin?.hatColor,
+        })
+      )
       notify()
     })
 
     socket.addEventListener('close', () => {
       connected = false
       remotes.clear()
+      leaderboard = []
       notify()
     })
 
@@ -120,7 +168,6 @@ export function connect(nickname: string, room = 'public') {
         remotes.delete(msg.id)
         notify()
       } else if (msg.type === 'states') {
-        // Merge (nicknames kept from earlier msgs)
         msg.players.forEach((p) => {
           const existing = remotes.get(p.id)
           remotes.set(p.id, {
@@ -133,16 +180,31 @@ export function connect(nickname: string, room = 'public') {
               yaw: 0,
               scale: 1,
               hp: 100,
+              score: 0,
               currentWeapon: 'fist',
+              bodyColor: '#ef476f',
+              hatKind: 'none',
+              hatColor: '#1a1a1a',
             }),
             ...p,
           })
         })
         notify()
+      } else if (msg.type === 'leaderboard') {
+        leaderboard = msg.top
+        notify()
+      } else if (msg.type === 'hit_you') {
+        if (hitHandler) {
+          hitHandler(
+            msg.damage,
+            [msg.knockX, msg.knockY, msg.knockZ],
+            msg.fromId
+          )
+        }
       }
     })
   } catch {
-    // connection failed — silent
+    // silent
   }
 }
 
@@ -153,10 +215,10 @@ export function disconnect() {
   }
   connected = false
   remotes.clear()
+  leaderboard = []
   myId = null
 }
 
-// Called from Player useFrame (throttled)
 let lastSendT = 0
 export function sendState(s: {
   x: number
@@ -165,7 +227,11 @@ export function sendState(s: {
   yaw: number
   scale: number
   hp: number
+  score: number
   currentWeapon: string
+  bodyColor: string
+  hatKind: string
+  hatColor: string
 }) {
   if (!socket || !connected) return
   const now = performance.now()
@@ -173,16 +239,32 @@ export function sendState(s: {
   lastSendT = now
   try {
     socket.send(JSON.stringify({ type: 'state', ...s }))
-  } catch {
-    // ignore
-  }
+  } catch {}
+}
+
+export function sendHit(
+  targetId: string,
+  damage: number,
+  knockback: [number, number, number]
+) {
+  if (!socket || !connected) return
+  try {
+    socket.send(
+      JSON.stringify({
+        type: 'hit',
+        targetId,
+        damage,
+        knockX: knockback[0],
+        knockY: knockback[1],
+        knockZ: knockback[2],
+      })
+    )
+  } catch {}
 }
 
 export function sendAction(action: 'hit' | 'weapon' | 'potion', target?: string) {
   if (!socket || !connected) return
   try {
     socket.send(JSON.stringify({ type: 'action', action, target }))
-  } catch {
-    // ignore
-  }
+  } catch {}
 }

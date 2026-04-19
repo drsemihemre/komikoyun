@@ -26,8 +26,14 @@ import {
 } from '@/lib/sounds'
 import { spawnImpact } from '@/lib/particles'
 import { TELEPORT_POINTS } from './SurprisePotions'
-import { getWeapon, type WeaponId } from '@/lib/weapons'
-import { sendState } from '@/lib/multiplayer'
+import { getWeapon, tierMultiplier, type WeaponId } from '@/lib/weapons'
+import {
+  sendState,
+  sendHit,
+  getRemotes,
+  registerHitHandler,
+  unregisterHitHandler,
+} from '@/lib/multiplayer'
 
 const BASE_SPEED = 10
 const JUMP = 13
@@ -90,6 +96,23 @@ export default function Player() {
   const scale = useGameStore((s) => s.scale)
   const cameraMode = useGameStore((s) => s.cameraMode)
   const currentWeapon = useGameStore((s) => s.currentWeapon)
+  const skin = useGameStore((s) => s.skin)
+
+  // Register MP hit handler — remote player'ın bize vurması
+  useEffect(() => {
+    registerHitHandler((damage, knock) => {
+      if (!body.current) return
+      const { playerHP, damagePlayer } = useGameStore.getState()
+      if (playerHP <= 0) return
+      damagePlayer(damage)
+      playDamage()
+      body.current.applyImpulse(
+        { x: knock[0], y: knock[1], z: knock[2] },
+        true
+      )
+    })
+    return () => unregisterHitHandler()
+  }, [])
 
   // Register player handle for creatures to attack us
   useEffect(() => {
@@ -149,6 +172,22 @@ export default function Player() {
     })
     return () => unregisterPlayer()
   }, [scale])
+
+  // Crouch — Shift hold
+  useEffect(() => {
+    const onDown = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') useGameStore.getState().setCrouching(true)
+    }
+    const onUp = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') useGameStore.getState().setCrouching(false)
+    }
+    document.addEventListener('keydown', onDown)
+    document.addEventListener('keyup', onUp)
+    return () => {
+      document.removeEventListener('keydown', onDown)
+      document.removeEventListener('keyup', onUp)
+    }
+  }, [])
 
   // Keyboard X → cycle weapon
   useEffect(() => {
@@ -302,7 +341,11 @@ export default function Player() {
       setPlayerHP,
       paused,
       gameStarted,
+      shopOpen,
+      crouching,
+      mobileCrouch,
     } = useGameStore.getState()
+    const isCrouching = crouching || mobileCrouch
     const keys = getKeys()
     const now = state.clock.elapsedTime
 
@@ -328,8 +371,8 @@ export default function Player() {
       return
     }
 
-    // Oyun duraklatıldı veya başlamadıysa: sadece kamera takibini koru, mantığı atla
-    if (paused || !gameStarted) {
+    // Shop açık veya duraklatıldı veya başlamadıysa: sadece kamera takibi
+    if (paused || !gameStarted || shopOpen) {
       const pos = body.current.translation()
       if (cameraMode !== 'first') {
         const camHeight = 6 + scale * 1.2
@@ -494,7 +537,9 @@ export default function Player() {
 
     // --- MOVEMENT + YAW ---
     if (!isRagdoll.current) {
-      const speed = BASE_SPEED * speedMult * Math.pow(scale, 0.45)
+      const crouchMult = isCrouching ? 0.5 : 1
+      const speed =
+        BASE_SPEED * speedMult * Math.pow(scale, 0.45) * crouchMult
 
       if (cameraMode === 'first') {
         // FPV: yaw driven by mouse; movement is forward/strafe relative to yaw
@@ -551,8 +596,10 @@ export default function Player() {
 
           const fwdX = Math.sin(currentYaw.current)
           const fwdZ = Math.cos(currentYaw.current)
-          const hitRange = 3.5 * scale
-          const hitForce = 22 * scale
+          const fistLevel = useGameStore.getState().weaponLevels.fist ?? 1
+          const fistMult = tierMultiplier(fistLevel)
+          const hitRange = 3.5 * scale * (1 + (fistLevel - 1) * 0.15)
+          const hitForce = 22 * scale * fistMult
 
           let hits = 0
           for (const c of getCreatures()) {
@@ -568,6 +615,24 @@ export default function Player() {
             if (dot < 0.35) continue
             c.takeHit([nx * hitForce, 9 * scale, nz * hitForce])
             spawnImpact(cp.x, cp.y + 0.5, cp.z, '#ffd60a', 0.8 + scale * 0.15)
+            hits++
+          }
+          // Remote players
+          for (const r of getRemotes()) {
+            const dx = r.x - pos.x
+            const dz = r.z - pos.z
+            const dist = Math.hypot(dx, dz)
+            if (dist > hitRange || dist < 0.1) continue
+            const nx = dx / dist
+            const nz = dz / dist
+            const dot = nx * fwdX + nz * fwdZ
+            if (dot < 0.35) continue
+            sendHit(r.id, 10 * fistMult, [
+              nx * hitForce * 0.5,
+              6,
+              nz * hitForce * 0.5,
+            ])
+            spawnImpact(r.x, r.y + 0.5, r.z, '#ffd60a', 1.0)
             hits++
           }
           if (hits > 0) {
@@ -640,7 +705,9 @@ export default function Player() {
               const dot = ndx * fwdX + ndz * fwdZ
               if (dot < 0.5) continue
 
-              const hitForce = 22 * scale
+              const wLevel = useGameStore.getState().weaponLevels[currentWeapon] ?? 1
+              const wMult = tierMultiplier(wLevel)
+              const hitForce = 22 * scale * wMult
               switch (currentWeapon) {
                 case 'water':
                   c.melt()
@@ -728,8 +795,10 @@ export default function Player() {
       } else {
         visualRoot.current.rotation.y = currentYaw.current
       }
-      visualRoot.current.scale.setScalar(scale)
-      visualRoot.current.visible = true // FPV'de de gövde/kol/bacak görünür
+      // Crouch: Y ekseninde hafif squash
+      const yScale = isCrouching ? scale * 0.65 : scale
+      visualRoot.current.scale.set(scale, yScale, scale)
+      visualRoot.current.visible = true
     }
 
     const air = Math.min(1, airTime.current * 2)
@@ -843,14 +912,19 @@ export default function Player() {
     }
 
     // Multiplayer: state'i sunucuya gönder (80ms throttled)
+    const curState = useGameStore.getState()
     sendState({
       x: pos.x,
       y: pos.y,
       z: pos.z,
       yaw: currentYaw.current,
       scale: scale,
-      hp: useGameStore.getState().playerHP,
-      currentWeapon: useGameStore.getState().currentWeapon,
+      hp: curState.playerHP,
+      score: curState.score,
+      currentWeapon: curState.currentWeapon,
+      bodyColor: curState.skin.bodyColor,
+      hatKind: curState.skin.hatKind,
+      hatColor: curState.skin.hatColor,
     })
 
     // Fail-safe
@@ -893,7 +967,7 @@ export default function Player() {
           <group ref={bodyPivot}>
             <mesh position={[0, -0.1, 0]} castShadow>
               <capsuleGeometry args={[0.45, 0.5, 6, 12]} />
-              <meshToonMaterial color="#ef476f" />
+              <meshToonMaterial color={skin.bodyColor} />
             </mesh>
           </group>
           <group ref={headPivot} position={[0, 0.65, 0]}>
@@ -922,17 +996,19 @@ export default function Player() {
               <torusGeometry args={[0.22, 0.05, 6, 16, Math.PI]} />
               <meshBasicMaterial color="#b23a48" />
             </mesh>
+            {/* Şapka */}
+            <HatMesh kind={skin.hatKind} color={skin.hatColor} />
           </group>
           <group ref={leftArm} position={[0.55, 0.25, 0]}>
             <mesh position={[0, -0.25, 0]} rotation={[0, 0, 0.3]} castShadow>
               <capsuleGeometry args={[0.13, 0.4, 6, 10]} />
-              <meshToonMaterial color="#ef476f" />
+              <meshToonMaterial color={skin.bodyColor} />
             </mesh>
           </group>
           <group ref={rightArm} position={[-0.55, 0.25, 0]}>
             <mesh position={[0, -0.25, 0]} rotation={[0, 0, -0.3]} castShadow>
               <capsuleGeometry args={[0.13, 0.4, 6, 10]} />
-              <meshToonMaterial color="#ef476f" />
+              <meshToonMaterial color={skin.bodyColor} />
             </mesh>
             <WeaponMesh id={currentWeapon} />
           </group>
@@ -965,6 +1041,102 @@ export default function Player() {
 function lerpAngle(a: number, b: number, t: number) {
   const diff = MathUtils.euclideanModulo(b - a + Math.PI, Math.PI * 2) - Math.PI
   return a + diff * t
+}
+
+// Şapka görseli — skin.hatKind'a göre
+export function HatMesh({
+  kind,
+  color,
+}: {
+  kind: 'none' | 'cone' | 'cylinder' | 'crown' | 'beanie'
+  color: string
+}) {
+  if (kind === 'none') return null
+
+  if (kind === 'cone') {
+    return (
+      <group position={[0, 0.95, 0]}>
+        <mesh castShadow>
+          <coneGeometry args={[0.55, 1.2, 12]} />
+          <meshToonMaterial color={color} />
+        </mesh>
+        {/* Yıldız süs */}
+        <mesh position={[0, 0.75, 0]}>
+          <sphereGeometry args={[0.1, 8, 8]} />
+          <meshBasicMaterial color="#ffd60a" />
+        </mesh>
+      </group>
+    )
+  }
+
+  if (kind === 'cylinder') {
+    return (
+      <group position={[0, 0.85, 0]}>
+        <mesh castShadow>
+          <cylinderGeometry args={[0.55, 0.55, 0.7, 14]} />
+          <meshToonMaterial color={color} />
+        </mesh>
+        {/* Şerit */}
+        <mesh position={[0, -0.3, 0]}>
+          <torusGeometry args={[0.56, 0.05, 8, 14]} />
+          <meshToonMaterial color="#ffffff" />
+        </mesh>
+        {/* Kenar disk */}
+        <mesh position={[0, -0.4, 0]}>
+          <cylinderGeometry args={[0.8, 0.8, 0.08, 14]} />
+          <meshToonMaterial color={color} />
+        </mesh>
+      </group>
+    )
+  }
+
+  if (kind === 'crown') {
+    return (
+      <group position={[0, 0.88, 0]}>
+        <mesh castShadow>
+          <cylinderGeometry args={[0.6, 0.6, 0.4, 14]} />
+          <meshToonMaterial color={color} />
+        </mesh>
+        {/* Zincir */}
+        <mesh position={[0, 0.22, 0]}>
+          <torusGeometry args={[0.61, 0.04, 8, 14]} />
+          <meshToonMaterial color="#ffd60a" />
+        </mesh>
+        {/* Mücevherler */}
+        {[0, 1, 2, 3, 4, 5].map((i) => {
+          const ang = (i / 6) * Math.PI * 2
+          return (
+            <mesh
+              key={i}
+              position={[Math.cos(ang) * 0.6, 0.25, Math.sin(ang) * 0.6]}
+              castShadow
+            >
+              <coneGeometry args={[0.08, 0.25, 6]} />
+              <meshToonMaterial color={i % 2 === 0 ? '#ef4444' : '#3b82f6'} />
+            </mesh>
+          )
+        })}
+      </group>
+    )
+  }
+
+  if (kind === 'beanie') {
+    return (
+      <group position={[0, 0.82, 0]}>
+        <mesh castShadow>
+          <sphereGeometry args={[0.62, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2]} />
+          <meshToonMaterial color={color} />
+        </mesh>
+        {/* Ponpon */}
+        <mesh position={[0, 0.45, 0]}>
+          <sphereGeometry args={[0.2, 10, 10]} />
+          <meshToonMaterial color="#ffffff" />
+        </mesh>
+      </group>
+    )
+  }
+
+  return null
 }
 
 // Sağ elde tutulan silah görseli — currentWeapon'a göre şekil değişir

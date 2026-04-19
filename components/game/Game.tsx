@@ -14,6 +14,7 @@ import MobileJoystick from '../ui/MobileJoystick'
 import PotionInventory from '../ui/PotionInventory'
 import StartScreen from '../ui/StartScreen'
 import PauseMenu from '../ui/PauseMenu'
+import ShopModal from '../ui/ShopModal'
 import { useGameStore } from '@/lib/store'
 import { getPlayerPos } from '@/lib/playerHandle'
 import { startMusic, startAmbient } from '@/lib/sounds'
@@ -79,17 +80,14 @@ export default function Game() {
     }
   }, [])
 
-  // ESC → pause toggle (oyun başladıysa)
+  // ESC → pause toggle (oyun başladıysa) — ama shop açıksa onu kapatmak ShopModal'ın görevi
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' && e.key !== 'p' && e.key !== 'P') return
       if (e.repeat) return
       const state = useGameStore.getState()
       if (!state.gameStarted) return
-      // ESC'i pointer-lock çıkışı da tetiklemesi için burada da handle'la
-      if (state.cameraMode === 'first' && document.pointerLockElement) {
-        // Browser'ın doğal ESC davranışı zaten lock'u kırar; pause'a da geç
-      }
+      if (state.shopOpen) return // shop açıkken ESC onu kapatır
       togglePause()
     }
     document.addEventListener('keydown', onKey)
@@ -139,6 +137,7 @@ export default function Game() {
       <PotionInventory />
       <MobileJoystick />
       <PauseMenu />
+      <ShopModal />
       <StartScreen />
     </div>
   )

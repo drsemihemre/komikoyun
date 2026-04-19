@@ -25,6 +25,7 @@ import Residents from './Residents'
 import SkyTraffic from './SkyTraffic'
 import DriveableKart from './DriveableKart'
 import RemotePlayers from './RemotePlayers'
+import Shop from './Shop'
 import { useGameStore } from '@/lib/store'
 
 export default function World() {
@@ -53,6 +54,8 @@ export default function World() {
       <Residents />
       <SkyTraffic />
       <DriveableKart />
+      <Shop kind="buy" position={[-9, 0, 6]} />
+      <Shop kind="upgrade" position={[9, 0, 6]} />
       <SpiralStairs position={[-16, 0, -4]} height={16} />
       <HitParticles />
       <RemotePlayers />

@@ -1,7 +1,14 @@
 import { create } from 'zustand'
 import { loadStats, saveStats } from './highScore'
 import type { WeaponId } from './weapons'
-import { WEAPONS } from './weapons'
+import { WEAPONS, upgradeCostFor } from './weapons'
+import {
+  loadWeapons,
+  saveWeapons,
+  loadSkin,
+  saveSkin,
+  type SkinPersist,
+} from './weaponStore'
 
 type Vec2 = { x: number; y: number }
 
@@ -17,6 +24,15 @@ type GameState = {
   isMobile: boolean
   // Weapons
   currentWeapon: WeaponId
+  unlockedWeapons: WeaponId[]
+  weaponLevels: Record<string, number>
+  // Skin
+  skin: SkinPersist
+  // Shop UI
+  shopOpen: 'buy' | 'upgrade' | null
+  // Crouch
+  crouching: boolean
+  mobileCrouch: boolean
   // Potion-driven effects
   scale: number
   speedMult: number
@@ -47,6 +63,12 @@ type GameState = {
   setIsMobile: (m: boolean) => void
   cycleWeapon: () => void
   setWeapon: (w: WeaponId) => void
+  buyWeapon: (w: WeaponId) => boolean // satın al
+  upgradeWeapon: (w: WeaponId) => boolean // tier yükselt
+  setSkin: (s: Partial<SkinPersist>) => void
+  openShop: (kind: 'buy' | 'upgrade' | null) => void
+  setCrouching: (b: boolean) => void
+  setMobileCrouch: (b: boolean) => void
   drinkPotion: (p: PotionType) => void
   resetPotions: () => void
   incrementHitCount: () => void
@@ -69,7 +91,7 @@ type GameState = {
 
 const SCALE_FACTOR = 1.12
 const SCALE_MIN = 0.25
-const SCALE_MAX = 50
+const SCALE_MAX = 100
 const SPEED_FACTOR = 1.1
 const SPEED_MIN = 0.3
 const SPEED_MAX = 3.5
@@ -77,6 +99,8 @@ const SPEED_MAX = 3.5
 export const PLAYER_HP_MAX = 100
 
 const initialStats = loadStats()
+const initialWeapons = loadWeapons()
+const initialSkin = loadSkin()
 
 function persistIfHigh(score: number, hitCount: number, koCount: number) {
   const cur = loadStats()
@@ -97,6 +121,12 @@ export const useGameStore = create<GameState>((set) => ({
   mobileWeaponFire: false,
   isMobile: false,
   currentWeapon: 'fist',
+  unlockedWeapons: initialWeapons.unlocked,
+  weaponLevels: initialWeapons.levels,
+  skin: initialSkin,
+  shopOpen: null,
+  crouching: false,
+  mobileCrouch: false,
   scale: 1,
   speedMult: 1,
   potionHits: { grow: 0, shrink: 0, speed: 0, slow: 0 },
@@ -121,11 +151,60 @@ export const useGameStore = create<GameState>((set) => ({
   setIsMobile: (isMobile) => set({ isMobile }),
   cycleWeapon: () =>
     set((s) => {
+      const unlocked = s.unlockedWeapons
+      if (unlocked.length <= 1) return {}
       const idx = WEAPONS.findIndex((w) => w.id === s.currentWeapon)
-      const next = WEAPONS[(idx + 1) % WEAPONS.length]
-      return { currentWeapon: next.id }
+      // Bir sonraki unlocked silahı bul
+      for (let i = 1; i <= WEAPONS.length; i++) {
+        const next = WEAPONS[(idx + i) % WEAPONS.length]
+        if (unlocked.includes(next.id)) return { currentWeapon: next.id }
+      }
+      return {}
     }),
   setWeapon: (w) => set({ currentWeapon: w }),
+
+  buyWeapon: (id) => {
+    const s = useGameStore.getState()
+    const def = WEAPONS.find((w) => w.id === id)
+    if (!def) return false
+    if (s.unlockedWeapons.includes(id)) return false
+    if (s.score < def.price) return false
+    const newUnlocked = [...s.unlockedWeapons, id]
+    const newLevels = { ...s.weaponLevels, [id]: 1 }
+    saveWeapons({ unlocked: newUnlocked, levels: newLevels })
+    useGameStore.setState({
+      score: s.score - def.price,
+      unlockedWeapons: newUnlocked,
+      weaponLevels: newLevels,
+      currentWeapon: id, // otomatik bu silaha geç
+    })
+    return true
+  },
+  upgradeWeapon: (id) => {
+    const s = useGameStore.getState()
+    if (!s.unlockedWeapons.includes(id)) return false
+    const tier = s.weaponLevels[id] ?? 1
+    const cost = upgradeCostFor(tier)
+    const def = WEAPONS.find((w) => w.id === id)
+    if (!def || tier >= def.maxTier) return false
+    if (s.score < cost) return false
+    const newLevels = { ...s.weaponLevels, [id]: tier + 1 }
+    saveWeapons({ unlocked: s.unlockedWeapons, levels: newLevels })
+    useGameStore.setState({
+      score: s.score - cost,
+      weaponLevels: newLevels,
+    })
+    return true
+  },
+  setSkin: (patch) =>
+    set((s) => {
+      const next = { ...s.skin, ...patch }
+      saveSkin(next)
+      return { skin: next }
+    }),
+  openShop: (shopOpen) => set({ shopOpen }),
+  setCrouching: (crouching) => set({ crouching }),
+  setMobileCrouch: (mobileCrouch) => set({ mobileCrouch }),
 
   drinkPotion: (p) =>
     set((state) => {

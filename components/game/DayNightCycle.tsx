@@ -60,16 +60,20 @@ function playEzan() {
   try {
     if (!ezanAudio) {
       ezanAudio = new Audio()
-      // OGG (Chrome/Firefox/Edge native)
       const canOgg = ezanAudio.canPlayType('audio/ogg').length > 0
       ezanAudio.src = canOgg ? '/adhan.oga' : '/adhan.mp3'
       ezanAudio.preload = 'auto'
       ezanAudio.volume = 0.7
     }
     ezanAudio.currentTime = 0
-    void ezanAudio.play().catch(() => {
-      // ignore autoplay block
-    })
+    void ezanAudio.play().catch(() => {})
+    // Sadece ilk 3 saniye
+    setTimeout(() => {
+      if (ezanAudio && !ezanAudio.paused) {
+        ezanAudio.pause()
+        ezanAudio.currentTime = 0
+      }
+    }, 3000)
   } catch {
     // ignore
   }

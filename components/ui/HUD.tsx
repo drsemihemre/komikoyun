@@ -8,6 +8,8 @@ import {
   isConnected as isMPConnected,
   subscribeMP,
   getRemotes,
+  getLeaderboard,
+  type LeaderboardEntry,
 } from '@/lib/multiplayer'
 import { loadNickname } from '@/lib/nickname'
 
@@ -36,12 +38,14 @@ export default function HUD() {
   const [mpConnected, setMpConnected] = useState(false)
   const [mpPeers, setMpPeers] = useState(0)
   const [nickname, setNickname] = useState('')
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
 
   useEffect(() => {
     setNickname(loadNickname())
     const update = () => {
       setMpConnected(isMPConnected())
       setMpPeers(getRemotes().length)
+      setLeaderboard(getLeaderboard())
     }
     update()
     return subscribeMP(update)
@@ -266,6 +270,29 @@ export default function HUD() {
           </button>
         )}
       </div>
+
+      {/* Leaderboard — sağ alt, desktop only */}
+      {!isMobile && mpConnected && leaderboard.length > 0 && (
+        <div className="absolute bottom-24 right-4 w-48 rounded-xl bg-black/50 px-3 py-2 text-white shadow-lg backdrop-blur-sm">
+          <div className="mb-1 flex items-center gap-1 text-xs font-bold opacity-80">
+            🏆 Liderlik
+          </div>
+          <div className="space-y-0.5">
+            {leaderboard.map((p, i) => (
+              <div
+                key={p.id}
+                className="flex items-center gap-2 text-xs tabular-nums"
+              >
+                <span className="w-4 opacity-60">{i + 1}.</span>
+                <span className="flex-1 truncate font-semibold">
+                  {p.nickname}
+                </span>
+                <span className="font-bold text-yellow-300">{p.score}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Current weapon badge — bottom center */}
       <div className="pointer-events-auto absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 rounded-2xl bg-black/50 px-4 py-2 text-white shadow-xl backdrop-blur-sm">
