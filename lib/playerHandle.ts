@@ -1,10 +1,12 @@
 // Tek oyuncu dünyasında oyuncuya global erişim sağlar —
 // yaratıklar oyuncu konumunu sorgulayıp saldırabilsin diye
+// Mancınık gibi dış etkiler Player'a impulse uygulayabilsin diye
 
 export type PlayerHandle = {
   getPos: () => { x: number; y: number; z: number } | null
   takeHit: (damage: number, knockbackDir: [number, number, number]) => void
-  isDown: () => boolean // ragdoll/yerde/HP=0 durumunda true
+  isDown: () => boolean
+  launch: (impulse: [number, number, number]) => void
 }
 
 let handle: PlayerHandle | null = null

@@ -56,6 +56,7 @@ export default function Player() {
   const isRagdoll = useRef(false)
   const ragdollStartT = useRef(0)
   const settleStartT = useRef(0)
+  const pendingLaunch = useRef<[number, number, number] | null>(null)
 
   const attackProgress = useRef(-1)
   const lastAttackT = useRef(0)
@@ -97,6 +98,9 @@ export default function Player() {
       isDown: () => {
         const hp = useGameStore.getState().playerHP
         return hp <= 0 || isRagdoll.current
+      },
+      launch: (impulse) => {
+        pendingLaunch.current = impulse
       },
     })
     return () => unregisterPlayer()
@@ -189,6 +193,18 @@ export default function Player() {
     const grounded = Math.abs(linvel.y) < 0.5
     if (grounded) airTime.current = 0
     else airTime.current += delta
+
+    // --- PENDING LAUNCH (from catapult) ---
+    if (pendingLaunch.current) {
+      const [lx, ly, lz] = pendingLaunch.current
+      pendingLaunch.current = null
+      if (!isRagdoll.current) enterRagdoll()
+      const mass = body.current.mass()
+      body.current.applyImpulse(
+        { x: lx * mass, y: ly * mass, z: lz * mass },
+        true
+      )
+    }
 
     // --- RAGDOLL TRIGGER ---
     if (
