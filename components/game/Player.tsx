@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import {
   RigidBody,
   CapsuleCollider,
@@ -9,8 +9,9 @@ import {
 import { useFrame } from '@react-three/fiber'
 import { useKeyboardControls } from '@react-three/drei'
 import { MathUtils, Vector3, type Group } from 'three'
-import { useGameStore, SAFE_ZONE } from '@/lib/store'
+import { useGameStore, SAFE_ZONE, PLAYER_HP_MAX } from '@/lib/store'
 import { getCreatures } from '@/lib/creatureRegistry'
+import { registerPlayer, unregisterPlayer } from '@/lib/playerHandle'
 
 const BASE_SPEED = 10
 const JUMP = 13
@@ -19,11 +20,16 @@ const INPUT_SMOOTH = 16
 const ROT_SMOOTH = 10
 const WALK_HZ = 7
 
-// Ragdoll thresholds
+// Ragdoll
 const FALL_AIRTIME = 0.9
 const FALL_VEL_Y = -18
 const RAGDOLL_MIN_DURATION = 1.5
 const RAGDOLL_SETTLE_TIME = 0.7
+
+// Creature damage
+const CREATURE_TOUCH_RANGE = 1.6 // * scale
+const CREATURE_DAMAGE = 8
+const CREATURE_DAMAGE_COOLDOWN = 1.2 // per creature
 
 export default function Player() {
   const body = useRef<RapierRigidBody>(null)
@@ -49,41 +55,93 @@ export default function Player() {
   const airTime = useRef(0)
   const bodyBob = useRef(0)
 
-  // Ragdoll state
   const isRagdoll = useRef(false)
   const ragdollStartT = useRef(0)
   const settleStartT = useRef(0)
 
-  // Attack state
   const attackProgress = useRef(-1)
   const lastAttackT = useRef(0)
   const wasAttackPressed = useRef(false)
+  const wasCameraPressed = useRef(false)
+
+  // Per-creature damage cooldowns
+  const creatureHitCooldowns = useRef(new Map<string, number>())
 
   const [, getKeys] = useKeyboardControls()
   const scale = useGameStore((s) => s.scale)
+  const cameraMode = useGameStore((s) => s.cameraMode)
+
+  // Register player for global access (creatures, etc.)
+  useEffect(() => {
+    registerPlayer({
+      getPos: () => {
+        if (!body.current) return null
+        const p = body.current.translation()
+        return { x: p.x, y: p.y, z: p.z }
+      },
+    })
+    return () => unregisterPlayer()
+  }, [])
 
   useFrame((state, delta) => {
     if (!body.current) return
 
-    const { mobileMove, mobileJump, mobileAttack, speedMult } =
-      useGameStore.getState()
+    const {
+      mobileMove,
+      mobileJump,
+      mobileAttack,
+      speedMult,
+      playerHP,
+      damagePlayer,
+      setPlayerHP,
+      toggleCamera,
+    } = useGameStore.getState()
     const keys = getKeys()
     const now = state.clock.elapsedTime
 
     const pos = body.current.translation()
     const linvel = body.current.linvel()
 
-    // Grounded detection
+    // Camera toggle (rising edge)
+    const camPressed = !!keys.camera
+    if (camPressed && !wasCameraPressed.current) toggleCamera()
+    wasCameraPressed.current = camPressed
+
+    // Grounded + airTime
     const grounded = Math.abs(linvel.y) < 0.5
     if (grounded) airTime.current = 0
     else airTime.current += delta
 
-    // --- RAGDOLL TRIGGER (fall) ---
+    // --- RAGDOLL TRIGGER ---
     if (
       !isRagdoll.current &&
       (airTime.current > FALL_AIRTIME || linvel.y < FALL_VEL_Y) &&
-      pos.y > -20
+      pos.y > -25
     ) {
+      enterRagdoll()
+    }
+
+    // Death → ragdoll + respawn
+    if (playerHP <= 0 && !isRagdoll.current) {
+      enterRagdoll()
+      // Queue full respawn after duration
+      setTimeout(() => {
+        if (!body.current) return
+        body.current.setTranslation(
+          { x: 0, y: 3, z: 0 },
+          true
+        )
+        body.current.setLinvel({ x: 0, y: 0, z: 0 }, true)
+        body.current.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true)
+        body.current.setEnabledRotations(false, false, false, true)
+        isRagdoll.current = false
+        settleStartT.current = 0
+        setPlayerHP(PLAYER_HP_MAX)
+      }, 2500)
+    }
+
+    function enterRagdoll() {
+      if (!body.current) return
       isRagdoll.current = true
       ragdollStartT.current = now
       settleStartT.current = 0
@@ -106,9 +164,9 @@ export default function Player() {
         if (settleStartT.current === 0) settleStartT.current = now
         if (
           now - settleStartT.current > RAGDOLL_SETTLE_TIME &&
-          now - ragdollStartT.current > RAGDOLL_MIN_DURATION
+          now - ragdollStartT.current > RAGDOLL_MIN_DURATION &&
+          playerHP > 0
         ) {
-          // Recover
           isRagdoll.current = false
           settleStartT.current = 0
           body.current.setEnabledRotations(false, false, false, true)
@@ -121,7 +179,6 @@ export default function Player() {
             },
             true
           )
-          // Bump up slightly to avoid clipping
           body.current.setTranslation(
             { x: pos.x, y: pos.y + 0.4 * scale, z: pos.z },
             true
@@ -132,9 +189,7 @@ export default function Player() {
       }
     }
 
-    // ---------------------------------
-    // INPUT HANDLING (skipped during ragdoll)
-    // ---------------------------------
+    // --- INPUT (skipped during ragdoll) ---
     const raw = rawInput.current.set(0, 0, 0)
     if (!isRagdoll.current) {
       if (keys.forward) raw.z -= 1
@@ -174,7 +229,7 @@ export default function Player() {
         1 - Math.exp(-ROT_SMOOTH * delta)
       )
 
-      // ---- ATTACK (rising edge detection) ----
+      // ATTACK
       const attackHeld = keys.attack || mobileAttack
       const attackEdge = attackHeld && !wasAttackPressed.current
       wasAttackPressed.current = attackHeld
@@ -210,37 +265,86 @@ export default function Player() {
           if (hits > 0) useGameStore.getState().incrementHitCount()
         }
       }
+
+      // CREATURE PROXIMITY DAMAGE
+      const dxS = pos.x - SAFE_ZONE.center[0]
+      const dzS = pos.z - SAFE_ZONE.center[2]
+      const inSafe = Math.hypot(dxS, dzS) < SAFE_ZONE.radius
+      if (!inSafe) {
+        const range = CREATURE_TOUCH_RANGE * scale
+        for (const c of getCreatures()) {
+          const cp = c.getPos()
+          if (!cp) continue
+          const dx = cp.x - pos.x
+          const dz = cp.z - pos.z
+          const dist = Math.hypot(dx, dz)
+          if (dist > range) continue
+          const last = creatureHitCooldowns.current.get(c.id) ?? -10
+          if (now - last < CREATURE_DAMAGE_COOLDOWN) continue
+          creatureHitCooldowns.current.set(c.id, now)
+          damagePlayer(CREATURE_DAMAGE)
+          // Small knockback
+          const nx = -dx / Math.max(dist, 0.01)
+          const nz = -dz / Math.max(dist, 0.01)
+          const k = 6 * scale
+          body.current.applyImpulse(
+            { x: nx * k, y: 4 * scale, z: nz * k },
+            true
+          )
+        }
+      }
     }
 
-    // Tick attack animation progress
+    // Attack animation tick
     if (attackProgress.current >= 0) {
       attackProgress.current += delta / 0.28
       if (attackProgress.current >= 1) attackProgress.current = -1
     }
 
-    // --- ANIMATION / VISUALS ---
-    // Camera
-    const camHeight = 6 + scale * 1.2
-    const camBack = 12 + scale * 1.8
-    camDesired.current.set(pos.x, pos.y + camHeight, pos.z + camBack)
-    state.camera.position.lerp(camDesired.current, 1 - Math.exp(-6 * delta))
-    camLookAt.current.set(pos.x, pos.y + 1.2 * scale, pos.z)
-    camCurrentLook.current.lerp(camLookAt.current, 1 - Math.exp(-10 * delta))
-    state.camera.lookAt(camCurrentLook.current)
+    // --- CAMERA ---
+    const headHeight = 0.85 * scale
+    if (cameraMode === 'first') {
+      // FPV — inside head, looking forward
+      const forwardX = Math.sin(currentYaw.current)
+      const forwardZ = Math.cos(currentYaw.current)
+      // Camera slightly forward from eye center so we don't see inside our own head
+      const camPos = camDesired.current.set(
+        pos.x + forwardX * 0.15 * scale,
+        pos.y + headHeight,
+        pos.z + forwardZ * 0.15 * scale
+      )
+      state.camera.position.lerp(camPos, 1 - Math.exp(-20 * delta))
+      camLookAt.current.set(
+        pos.x + forwardX * 5,
+        pos.y + headHeight,
+        pos.z + forwardZ * 5
+      )
+      state.camera.lookAt(camLookAt.current)
+    } else {
+      // Third person
+      const camHeight = 6 + scale * 1.2
+      const camBack = 12 + scale * 1.8
+      camDesired.current.set(pos.x, pos.y + camHeight, pos.z + camBack)
+      state.camera.position.lerp(camDesired.current, 1 - Math.exp(-6 * delta))
+      camLookAt.current.set(pos.x, pos.y + 1.2 * scale, pos.z)
+      camCurrentLook.current.lerp(camLookAt.current, 1 - Math.exp(-10 * delta))
+      state.camera.lookAt(camCurrentLook.current)
+    }
 
+    // --- VISUALS ---
     if (visualRoot.current) {
       if (isRagdoll.current) {
-        // In ragdoll, rotation is controlled by physics — don't override
-        visualRoot.current.rotation.set(0, 0, 0) // physics will rotate via body
+        visualRoot.current.rotation.set(0, 0, 0)
       } else {
         visualRoot.current.rotation.y = currentYaw.current
       }
       visualRoot.current.scale.setScalar(scale)
+      // FPV: hide character (we're inside the head)
+      visualRoot.current.visible = cameraMode !== 'first' || isRagdoll.current
     }
 
     const air = Math.min(1, airTime.current * 2)
 
-    // Body tilt
     if (!isRagdoll.current) {
       const targetTiltX = -moveMag * 0.18
       currentTilt.current.x = MathUtils.damp(
@@ -260,7 +364,6 @@ export default function Player() {
       tiltGroup.current.position.y = isRagdoll.current ? 0 : bodyBob.current
     }
 
-    // Walk cycle
     walkPhase.current += delta * WALK_HZ * moveMag
     const walkAmp = moveMag * 0.85
     const swing = Math.sin(walkPhase.current) * walkAmp
@@ -279,7 +382,6 @@ export default function Player() {
       bodyPivot.current.rotation.y = Math.sin(walkPhase.current) * 0.12 * moveMag
     }
 
-    // Legs
     if (leftLeg.current && rightLeg.current) {
       if (isRagdoll.current) {
         leftLeg.current.rotation.x = Math.sin(now * 9) * 1.2
@@ -305,7 +407,6 @@ export default function Player() {
       }
     }
 
-    // Arms — attack animation has priority on right arm
     if (leftArm.current && rightArm.current) {
       if (isRagdoll.current) {
         leftArm.current.rotation.x = Math.cos(now * 8 + 1) * 1.3
@@ -317,7 +418,6 @@ export default function Player() {
         const swingAmp = p < 0.5 ? p * 2 : 2 - p * 2
         rightArm.current.rotation.x = -swingAmp * 2.4
         rightArm.current.rotation.z = -0.3 + swingAmp * 1.1
-        // Left arm keeps walking
         leftArm.current.rotation.x = -swing * 0.9
         leftArm.current.rotation.z = 0.3
       } else if (air > 0.3) {
@@ -349,8 +449,8 @@ export default function Player() {
       }
     }
 
-    // Respawn fail-safe
-    if (pos.y < -40) {
+    // Fail-safe respawn if fell off world
+    if (pos.y < -45) {
       body.current.setTranslation({ x: 0, y: 5, z: 0 }, true)
       body.current.setLinvel({ x: 0, y: 0, z: 0 }, true)
       body.current.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true)
@@ -358,6 +458,9 @@ export default function Player() {
       isRagdoll.current = false
       settleStartT.current = 0
       smoothInput.current.set(0, 0, 0)
+      if (useGameStore.getState().playerHP <= 0) {
+        useGameStore.getState().setPlayerHP(PLAYER_HP_MAX)
+      }
     }
   })
 

@@ -4,6 +4,8 @@ import Building from './Building'
 import SpiralStairs from './SpiralStairs'
 import SafeZone from './SafeZone'
 import Arena from './Arena'
+import HupaLupa from './HupaLupa'
+import Road from './Road'
 
 export default function World() {
   return (
@@ -12,6 +14,8 @@ export default function World() {
       <Boundary />
       <SafeZone />
       <Arena />
+      <HupaLupa />
+      <Road />
       <Building position={[18, 0, -6]} height={24} />
       <SpiralStairs position={[-16, 0, -4]} height={16} />
     </>
