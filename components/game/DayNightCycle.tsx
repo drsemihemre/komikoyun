@@ -10,25 +10,15 @@ type Props = {
   ambientRef: React.RefObject<AmbientLight | null>
 }
 
-// Hızlandırılmış döngü: 24 gerçek dakika = 1 oyun günü (24 oyun saati)
-// Gündüz 18 dakika, gece 6 dakika (18 oyun saati gündüz, 6 oyun saati gece)
-// Gündüz: 03:00 - 21:00 (18 saat)
-// Gece: 21:00 - 03:00 (6 saat)
-let mountedAtMs: number | null = null
-let startHour = 10
-
-function ensureMounted() {
-  if (mountedAtMs === null) {
-    mountedAtMs = Date.now()
-    const now = new Date()
-    startHour = now.getHours() + now.getMinutes() / 60
-  }
-}
+// Hızlandırılmış döngü: 24 gerçek dakika = 1 oyun günü
+// TÜM İSTEMCİLER AYNI ZAMAN — Unix timestamp tabanlı, server'a gerek yok
+// (NTP senkronu sayesinde her cihazda Date.now() ≈ aynı)
+// 1 gerçek dakika = 1 oyun saati → 24 gerçek dakikada tam döngü
+// Gündüz 18 dk (03:00-21:00), gece 6 dk (21:00-03:00)
 
 function currentGameHour(): number {
-  ensureMounted()
-  const elapsedMin = (Date.now() - (mountedAtMs ?? 0)) / 60000
-  return (((startHour + elapsedMin) % 24) + 24) % 24
+  const realMinutes = Date.now() / 60000
+  return ((realMinutes % 24) + 24) % 24
 }
 
 const DAY_START = 3
