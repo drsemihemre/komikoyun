@@ -18,11 +18,9 @@ type Pipe = {
 const PIPES: Pipe[] = [
   { id: 'A', position: [-35, 0, -55], pairId: 'B' },
   { id: 'B', position: [40, 0, -55], pairId: 'A' },
-  { id: 'C', position: [0, 0, -55], pairId: 'D' },
-  { id: 'D', position: [-25, 0, -20], pairId: 'C' },
 ]
 
-const TRIGGER_R = 1.1
+const TRIGGER_R = 2.2
 const COOLDOWN = 2.2
 
 export default function MarioPipes() {
@@ -60,7 +58,7 @@ function MarioPipe({ pipe, pair }: { pipe: Pipe; pair: Pipe }) {
     const dz = pp.z - pipe.position[2]
     const dist = Math.hypot(dx, dz)
     if (dist > TRIGGER_R) return
-    if (pp.y > pipe.position[1] + 4.5) return
+    if (pp.y > pipe.position[1] + 5.5) return
     if (pp.y < pipe.position[1] - 1) return
 
     lastUseRef.current = now

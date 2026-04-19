@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Sky, Stars } from '@react-three/drei'
 import type { DirectionalLight, AmbientLight } from 'three'
@@ -10,8 +10,10 @@ type Props = {
   ambientRef: React.RefObject<AmbientLight | null>
 }
 
-// Hızlandırılmış döngü: 24 gerçek dakika = 1 oyun günü (24 saat)
-// Başlangıç oyun saati = o anki yerel saat, sonra 60× hızla ilerle
+// Hızlandırılmış döngü: 24 gerçek dakika = 1 oyun günü (24 oyun saati)
+// Gündüz 18 dakika, gece 6 dakika (18 oyun saati gündüz, 6 oyun saati gece)
+// Gündüz: 03:00 - 21:00 (18 saat)
+// Gece: 21:00 - 03:00 (6 saat)
 let mountedAtMs: number | null = null
 let startHour = 10
 
@@ -26,19 +28,22 @@ function ensureMounted() {
 function currentGameHour(): number {
   ensureMounted()
   const elapsedMin = (Date.now() - (mountedAtMs ?? 0)) / 60000
-  // 1 gerçek dakika = 1 oyun saati
-  return ((startHour + elapsedMin) % 24 + 24) % 24
+  return (((startHour + elapsedMin) % 24) + 24) % 24
 }
+
+const DAY_START = 3
+const DAY_END = 21
+const DAY_HOURS = DAY_END - DAY_START // 18
 
 function sunPositionFromGameTime(): [number, number, number] {
   const h = currentGameHour()
   let angle: number
-  if (h >= 6 && h <= 20) {
-    const progress = (h - 6) / 14
+  if (h >= DAY_START && h <= DAY_END) {
+    const progress = (h - DAY_START) / DAY_HOURS
     angle = progress * Math.PI
   } else {
-    const nightH = h < 6 ? h + 4 : h - 20
-    const progress = nightH / 10
+    const nightH = h < DAY_START ? h + (24 - DAY_END) : h - DAY_END
+    const progress = nightH / (24 - DAY_HOURS) // 6 hours
     angle = Math.PI + progress * Math.PI
   }
   const sunX = Math.cos(angle) * 80
@@ -46,16 +51,50 @@ function sunPositionFromGameTime(): [number, number, number] {
   return [sunX, sunY, 30]
 }
 
+// Ezan — gün doğumu ve gün batımında bir kere oynar
+function playEzan() {
+  if (typeof window === 'undefined') return
+  if (!window.speechSynthesis) return
+  try {
+    window.speechSynthesis.cancel()
+    const utt = new SpeechSynthesisUtterance('Allahu ekber, Allahu ekber')
+    utt.lang = 'ar-SA'
+    utt.rate = 0.6
+    utt.pitch = 0.85
+    utt.volume = 0.9
+    window.speechSynthesis.speak(utt)
+  } catch {
+    // ignore
+  }
+}
+
 export default function DayNightCycle({ dirLightRef, ambientRef }: Props) {
   const [sunPos, setSunPos] = useState<[number, number, number]>(() =>
     sunPositionFromGameTime()
   )
   const [gameHour, setGameHour] = useState(() => currentGameHour())
+  const lastHour = useRef<number | null>(null)
 
   useEffect(() => {
     const id = setInterval(() => {
+      const h = currentGameHour()
+      // Sunrise / sunset detection (saat crossing)
+      if (lastHour.current !== null) {
+        // Gün batımı: 21. saat'i geçti
+        const wasBeforeSunset =
+          lastHour.current < DAY_END && h >= DAY_END && h < DAY_END + 1
+        // Gün doğumu: 3. saat'i geçti
+        const crossedSunrise =
+          lastHour.current < DAY_START &&
+          h >= DAY_START &&
+          h < DAY_START + 1
+        if (wasBeforeSunset || crossedSunrise) {
+          playEzan()
+        }
+      }
+      lastHour.current = h
       setSunPos(sunPositionFromGameTime())
-      setGameHour(currentGameHour())
+      setGameHour(h)
     }, 1500)
     return () => clearInterval(id)
   }, [])
@@ -110,13 +149,11 @@ export default function DayNightCycle({ dirLightRef, ambientRef }: Props) {
           speed={0.3}
         />
       )}
-      {/* Game hour export to other components (Mosque etc.) */}
       <GameClock gameHour={gameHour} />
     </>
   )
 }
 
-// Oyun saati'ni tüm dünyaya yayın — mosque, NPC'ler vs. kullanabilir
 let lastGameHour = 10
 export function getGameHour() {
   return lastGameHour

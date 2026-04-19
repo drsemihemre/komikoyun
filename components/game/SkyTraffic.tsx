@@ -119,9 +119,10 @@ function Flyer({ flyer }: { flyer: FlyerState }) {
     if (flyer.kind === 'plane' || flyer.kind === 'superman') {
       const dx = flyer.endPos[0] - flyer.startPos[0]
       const dz = flyer.endPos[2] - flyer.startPos[2]
-      groupRef.current.rotation.y = Math.atan2(dx, dz)
+      // Plane/Superman mesh'inin forward yönü local +X (yana duran cylinder).
+      // Movement yönüne +X hizalamak için atan2(dx,dz) - π/2 offset.
+      groupRef.current.rotation.y = Math.atan2(dx, dz) - Math.PI / 2
     } else if (flyer.kind === 'rocket') {
-      // Rocket points up
       groupRef.current.rotation.x = 0
     }
   })

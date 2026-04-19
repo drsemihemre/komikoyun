@@ -243,11 +243,10 @@ export default function Player() {
       document.removeEventListener('pointerlockchange', onLockChange)
   }, [])
 
-  // Mouse look in FPV
+  // Mouse look — FPV'de karakter yönü, 3. şahıs'ta kamera orbit
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
       if (!document.pointerLockElement) return
-      if (useGameStore.getState().cameraMode !== 'first') return
       mouseYaw.current -= e.movementX * MOUSE_SENS
       mousePitch.current = MathUtils.clamp(
         mousePitch.current - e.movementY * MOUSE_SENS,
@@ -259,6 +258,21 @@ export default function Player() {
     return () => document.removeEventListener('mousemove', onMouseMove)
   }, [])
 
+  // Canvas/document tıklama → pointer lock aktif et (her iki modda da)
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null
+      if (target && (target.closest('button') || target.closest('input')))
+        return
+      const s = useGameStore.getState()
+      if (!s.gameStarted || s.paused) return
+      if (document.pointerLockElement) return
+      document.body.requestPointerLock?.()
+    }
+    document.addEventListener('click', onClick)
+    return () => document.removeEventListener('click', onClick)
+  }, [])
+
   // When cameraMode changes via button (not keyboard), also handle pointer lock
   useEffect(() => {
     if (cameraMode === 'first') {
@@ -268,9 +282,10 @@ export default function Player() {
         document.body.requestPointerLock?.()
       }
     } else {
-      if (document.pointerLockElement) {
-        document.exitPointerLock?.()
-      }
+      // 3. şahıs'a geçişte kamera orbit sıfırlanır (kamera arkada)
+      mouseYaw.current = 0
+      mousePitch.current = 0
+      // pointer lock bu modda da kullanılabilir (orbit için)
     }
   }, [cameraMode])
 
@@ -386,17 +401,30 @@ export default function Player() {
       enterRagdoll()
     }
 
-    // HP=0 → ragdoll + respawn
+    // HP=0 → ragdoll + respawn (tamamen sıfırla)
     if (playerHP <= 0 && !isRagdoll.current) {
       enterRagdoll()
       setTimeout(() => {
         if (!body.current) return
         body.current.setTranslation({ x: 0, y: 3, z: 0 }, true)
         body.current.setLinvel({ x: 0, y: 0, z: 0 }, true)
+        body.current.setAngvel({ x: 0, y: 0, z: 0 }, true)
         body.current.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true)
         body.current.setEnabledRotations(false, false, false, true)
         isRagdoll.current = false
         settleStartT.current = 0
+        pendingLaunch.current = null
+        airTime.current = 0
+        peakFallVel.current = 0
+        currentYaw.current = 0
+        targetYaw.current = 0
+        mouseYaw.current = 0
+        mousePitch.current = 0
+        smoothInput.current.set(0, 0, 0)
+        rawInput.current.set(0, 0, 0)
+        wasAttackPressed.current = false
+        wasWeaponFirePressed.current = false
+        wasGrounded.current = true
         setPlayerHP(PLAYER_HP_MAX)
       }, 2500)
     }
@@ -674,9 +702,18 @@ export default function Player() {
       )
       state.camera.lookAt(camLookAt.current)
     } else {
+      // 3. şahıs — mouseYaw/mousePitch ile orbit
       const camHeight = 6 + scale * 1.2
       const camBack = 12 + scale * 1.8
-      camDesired.current.set(pos.x, pos.y + camHeight, pos.z + camBack)
+      const yaw = mouseYaw.current
+      const pitch = mousePitch.current
+      const horizontalDist = camBack * Math.cos(pitch)
+      const vertOffset = -camBack * Math.sin(pitch)
+      camDesired.current.set(
+        pos.x + Math.sin(yaw) * horizontalDist,
+        pos.y + camHeight + vertOffset,
+        pos.z + Math.cos(yaw) * horizontalDist
+      )
       state.camera.position.lerp(camDesired.current, 1 - Math.exp(-6 * delta))
       camLookAt.current.set(pos.x, pos.y + 1.2 * scale, pos.z)
       camCurrentLook.current.lerp(camLookAt.current, 1 - Math.exp(-10 * delta))
@@ -808,11 +845,16 @@ export default function Player() {
     if (pos.y < -45) {
       body.current.setTranslation({ x: 0, y: 5, z: 0 }, true)
       body.current.setLinvel({ x: 0, y: 0, z: 0 }, true)
+      body.current.setAngvel({ x: 0, y: 0, z: 0 }, true)
       body.current.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true)
       body.current.setEnabledRotations(false, false, false, true)
       isRagdoll.current = false
       settleStartT.current = 0
       smoothInput.current.set(0, 0, 0)
+      rawInput.current.set(0, 0, 0)
+      currentYaw.current = 0
+      targetYaw.current = 0
+      peakFallVel.current = 0
       if (useGameStore.getState().playerHP <= 0) {
         useGameStore.getState().setPlayerHP(PLAYER_HP_MAX)
       }
@@ -863,44 +905,10 @@ export default function Player() {
               <sphereGeometry args={[0.04, 8, 8]} />
               <meshBasicMaterial color="#ffffff" />
             </mesh>
-            {/* Komik kocaman gülümseme */}
-            <mesh position={[0, -0.08, 0.72]} rotation={[Math.PI, 0, 0]}>
-              <torusGeometry args={[0.28, 0.07, 8, 20, Math.PI]} />
+            {/* Basit gülüş */}
+            <mesh position={[0, -0.05, 0.65]} rotation={[Math.PI, 0, 0]}>
+              <torusGeometry args={[0.22, 0.05, 6, 16, Math.PI]} />
               <meshBasicMaterial color="#b23a48" />
-            </mesh>
-            {/* Dil — komik ufak pembe */}
-            <mesh position={[0.05, -0.2, 0.76]}>
-              <sphereGeometry args={[0.12, 12, 10]} />
-              <meshBasicMaterial color="#ff6b9d" />
-            </mesh>
-            {/* Tek komik diş */}
-            <mesh position={[-0.08, -0.06, 0.78]}>
-              <boxGeometry args={[0.07, 0.12, 0.03]} />
-              <meshBasicMaterial color="#ffffff" />
-            </mesh>
-            {/* Sol kaş yukarı, sağ kaş aşağı — komik şaşkın ifade */}
-            <mesh
-              position={[0.28, 0.45, 0.55]}
-              rotation={[0, 0, -0.4]}
-            >
-              <boxGeometry args={[0.22, 0.08, 0.05]} />
-              <meshBasicMaterial color="#3d2817" />
-            </mesh>
-            <mesh
-              position={[-0.28, 0.4, 0.55]}
-              rotation={[0, 0, 0.25]}
-            >
-              <boxGeometry args={[0.22, 0.08, 0.05]} />
-              <meshBasicMaterial color="#3d2817" />
-            </mesh>
-            {/* Yanak rengi — sağlık göstergesi */}
-            <mesh position={[0.35, -0.02, 0.55]}>
-              <sphereGeometry args={[0.11, 10, 10]} />
-              <meshBasicMaterial color="#ff8fab" transparent opacity={0.7} />
-            </mesh>
-            <mesh position={[-0.35, -0.02, 0.55]}>
-              <sphereGeometry args={[0.11, 10, 10]} />
-              <meshBasicMaterial color="#ff8fab" transparent opacity={0.7} />
             </mesh>
           </group>
           <group ref={leftArm} position={[0.55, 0.25, 0]}>

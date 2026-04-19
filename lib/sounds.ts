@@ -399,9 +399,27 @@ let musicStartT = 0
 let nextBeatT = 0
 let musicLoopId: number | undefined
 let musicGain: GainNode | null = null
+let musicReverb: ConvolverNode | null = null
+let musicDelay: DelayNode | null = null
 
 const BPM = 108
 const BEAT = 60 / BPM
+
+function buildReverbImpulse(c: AudioContext, duration = 2.5): AudioBuffer {
+  const sampleRate = c.sampleRate
+  const length = Math.floor(sampleRate * duration)
+  const buf = c.createBuffer(2, length, sampleRate)
+  for (let ch = 0; ch < 2; ch++) {
+    const data = buf.getChannelData(ch)
+    for (let i = 0; i < length; i++) {
+      // exponential decay, stereo variation
+      const t = i / length
+      data[i] =
+        (Math.random() * 2 - 1) * Math.pow(1 - t, 2.5) * (ch === 0 ? 1 : 0.95)
+    }
+  }
+  return buf
+}
 
 type Chord = { root: number; third: number; fifth: number; seventh: number }
 
@@ -419,21 +437,45 @@ const CHORDS: Chord[] = [
 
 const midiToFreq = (m: number) => 440 * Math.pow(2, (m - 69) / 12)
 
+// Zengin synth: 2 detune oscillator + filter envelope + reverb/delay routing
 function musicEnvelope(
   c: AudioContext,
   freq: number,
   startAt: number,
   duration: number,
   type: OscillatorType,
-  peakGain: number
+  peakGain: number,
+  filterCutoff: number = 3500,
+  filterQ: number = 1.2
 ) {
-  const osc = c.createOscillator()
-  osc.type = type
-  osc.frequency.value = freq
+  const attack = Math.min(0.04, duration * 0.15)
+  const release = Math.min(0.35, duration * 0.45)
+
+  // 2 detuned oscillators for thickness
+  const osc1 = c.createOscillator()
+  osc1.type = type
+  osc1.frequency.value = freq
+  osc1.detune.value = -6
+
+  const osc2 = c.createOscillator()
+  osc2.type = type
+  osc2.frequency.value = freq
+  osc2.detune.value = 6
+
+  const filter = c.createBiquadFilter()
+  filter.type = 'lowpass'
+  filter.frequency.setValueAtTime(filterCutoff * 0.3, startAt)
+  filter.frequency.linearRampToValueAtTime(
+    filterCutoff,
+    startAt + attack * 2
+  )
+  filter.frequency.exponentialRampToValueAtTime(
+    filterCutoff * 0.6,
+    startAt + duration
+  )
+  filter.Q.value = filterQ
 
   const g = c.createGain()
-  const attack = Math.min(0.05, duration * 0.2)
-  const release = Math.min(0.3, duration * 0.4)
   g.gain.setValueAtTime(0, startAt)
   g.gain.linearRampToValueAtTime(peakGain, startAt + attack)
   g.gain.setValueAtTime(peakGain, startAt + duration - release)
@@ -442,10 +484,22 @@ function musicEnvelope(
     startAt + duration
   )
 
-  osc.connect(g)
+  osc1.connect(filter)
+  osc2.connect(filter)
+  filter.connect(g)
   g.connect(musicGain ?? c.destination)
-  osc.start(startAt)
-  osc.stop(startAt + duration + 0.02)
+  // Send to reverb for ambient tail
+  if (musicReverb) {
+    const revSend = c.createGain()
+    revSend.gain.value = 0.25
+    g.connect(revSend)
+    revSend.connect(musicReverb)
+  }
+
+  osc1.start(startAt)
+  osc1.stop(startAt + duration + 0.02)
+  osc2.start(startAt)
+  osc2.stop(startAt + duration + 0.02)
 }
 
 function playDrum(
@@ -534,15 +588,17 @@ function scheduleBeat(beatIndex: number, time: number) {
   const beatInChord = beatIndex % 4
   const totalBar = Math.floor(beatIndex / 4)
 
-  // Bass — root on beat 1, fifth on beat 3 (walking bass)
+  // Bass — root on beat 1, fifth on beat 3 (walking bass) — deep filtered
   if (beatInChord === 0) {
     musicEnvelope(
       c,
       midiToFreq(chord.root - 12),
       time,
       BEAT * 1.8,
-      'sine',
-      0.16
+      'sawtooth',
+      0.22,
+      700,
+      3
     )
   } else if (beatInChord === 2) {
     musicEnvelope(
@@ -550,16 +606,56 @@ function scheduleBeat(beatIndex: number, time: number) {
       midiToFreq(chord.fifth - 12),
       time,
       BEAT * 1.8,
-      'sine',
-      0.14
+      'sawtooth',
+      0.18,
+      700,
+      3
     )
   }
 
-  // Pad — full chord on beat 1 of each bar
+  // Pad — full chord on beat 1 of each bar, warm filtered
   if (beatInChord === 0) {
-    musicEnvelope(c, midiToFreq(chord.root), time, BEAT * 4, 'sine', 0.035)
-    musicEnvelope(c, midiToFreq(chord.third), time, BEAT * 4, 'sine', 0.03)
-    musicEnvelope(c, midiToFreq(chord.fifth), time, BEAT * 4, 'sine', 0.03)
+    musicEnvelope(
+      c,
+      midiToFreq(chord.root),
+      time,
+      BEAT * 4,
+      'triangle',
+      0.05,
+      1800,
+      1
+    )
+    musicEnvelope(
+      c,
+      midiToFreq(chord.third),
+      time,
+      BEAT * 4,
+      'triangle',
+      0.04,
+      1800,
+      1
+    )
+    musicEnvelope(
+      c,
+      midiToFreq(chord.fifth),
+      time,
+      BEAT * 4,
+      'triangle',
+      0.04,
+      1800,
+      1
+    )
+    // extra voice: seventh bir oktav üstte — jazz hissi
+    musicEnvelope(
+      c,
+      midiToFreq(chord.seventh),
+      time,
+      BEAT * 4,
+      'sine',
+      0.028,
+      2500,
+      1
+    )
   }
 
   // Drums
@@ -571,21 +667,28 @@ function scheduleBeat(beatIndex: number, time: number) {
   playDrum(c, 'hihat', time)
   playDrum(c, 'hihat', time + BEAT * 0.5)
 
-  // Melody — pentatonic with pattern variation
-  // Notes: chord + pentatonic scale tones above
+  // Melody — pentatonic with pattern variation, bright filter
   const pentatonic = [
     chord.root + 12,
     chord.third + 12,
     chord.fifth + 12,
     chord.seventh + 12,
-    chord.root + 19, // octave + fifth
+    chord.root + 19,
   ]
   const rhythmSeed = pseudoRand(beatIndex * 31 + totalBar * 7)
-  // Every other beat, play a melody note
   if (beatInChord === 1 || beatInChord === 3 || rhythmSeed > 0.7) {
     const noteIdx = Math.floor(pseudoRand(beatIndex * 13 + 5) * pentatonic.length)
     const note = pentatonic[noteIdx]
-    musicEnvelope(c, midiToFreq(note), time, BEAT * 0.9, 'triangle', 0.06)
+    musicEnvelope(
+      c,
+      midiToFreq(note),
+      time,
+      BEAT * 0.9,
+      'sawtooth',
+      0.08,
+      4500,
+      2
+    )
   }
 
   // Sparkle decoration every 8 bars
@@ -596,7 +699,19 @@ function scheduleBeat(beatIndex: number, time: number) {
       time,
       BEAT * 1.5,
       'sine',
-      0.035
+      0.05,
+      8000,
+      0.5
+    )
+    musicEnvelope(
+      c,
+      midiToFreq(chord.third + 24),
+      time + BEAT * 0.5,
+      BEAT * 1.2,
+      'sine',
+      0.04,
+      8000,
+      0.5
     )
   }
 
@@ -630,10 +745,33 @@ export function startMusic() {
   const c = getCtx()
   if (!c) return
   if (!musicGain) {
+    // Müzik zinciri: dry + reverb tail + delay feedback
     musicGain = c.createGain()
-    // Silah ses efektleri öne çıksın diye müzik kısıldı
-    musicGain.gain.value = 0.3
+    // Silah sesleri için daha da kısık (önceki 0.3 → 0.1, yaklaşık 1/3)
+    musicGain.gain.value = 0.1
     musicGain.connect(masterGain ?? c.destination)
+
+    // Reverb
+    musicReverb = c.createConvolver()
+    musicReverb.buffer = buildReverbImpulse(c, 2.2)
+    const reverbWet = c.createGain()
+    reverbWet.gain.value = 0.35
+    musicReverb.connect(reverbWet)
+    reverbWet.connect(musicGain)
+
+    // Delay feedback (dotted 8th)
+    musicDelay = c.createDelay(1)
+    musicDelay.delayTime.value = (60 / BPM) * 0.75
+    const feedback = c.createGain()
+    feedback.gain.value = 0.28
+    musicDelay.connect(feedback)
+    feedback.connect(musicDelay)
+    const delaySend = c.createGain()
+    delaySend.gain.value = 0.22
+    musicDelay.connect(delaySend)
+    delaySend.connect(musicGain)
+    // delay input comes from oscillators' send
+    // (we don't send by default to keep signal dry unless wanted)
   }
   musicPlaying = true
   musicStartT = c.currentTime + 0.15
@@ -651,7 +789,7 @@ export function stopMusic() {
 
 export function setMusicEnabled(on: boolean) {
   if (!musicGain) return
-  musicGain.gain.value = on ? 0.3 : 0
+  musicGain.gain.value = on ? 0.1 : 0
 }
 
 let musicEnabledFlag = true

@@ -13,27 +13,24 @@ export default function SpiralStairs({ position, height }: Props) {
   const totalSteps = Math.floor(height / STEP_RISE)
   const steps = []
 
-  for (let strand = 0; strand < 2; strand++) {
-    const phaseOffset = strand * Math.PI
-    for (let i = 0; i < totalSteps; i++) {
-      const angle = (i / STEPS_PER_TURN) * Math.PI * 2 + phaseOffset
-      const y = i * STEP_RISE + 0.18
-      const x = Math.cos(angle) * RADIUS
-      const z = Math.sin(angle) * RADIUS
-      const color = strand === 0 ? '#a8dadc' : '#f1c0e8'
-      steps.push(
-        <mesh
-          key={`${strand}-${i}`}
-          position={[x, y, z]}
-          rotation={[0, -angle + Math.PI / 2, 0]}
-          castShadow={i % 4 === 0}
-          receiveShadow
-        >
-          <boxGeometry args={[2.8, 0.28, 1.8]} />
-          <meshToonMaterial color={color} />
-        </mesh>
-      )
-    }
+  // Tek sarmal (önceki 2 strand'dan tekine düşürüldü)
+  for (let i = 0; i < totalSteps; i++) {
+    const angle = (i / STEPS_PER_TURN) * Math.PI * 2
+    const y = i * STEP_RISE + 0.18
+    const x = Math.cos(angle) * RADIUS
+    const z = Math.sin(angle) * RADIUS
+    steps.push(
+      <mesh
+        key={i}
+        position={[x, y, z]}
+        rotation={[0, -angle + Math.PI / 2, 0]}
+        castShadow={i % 4 === 0}
+        receiveShadow
+      >
+        <boxGeometry args={[2.4, 0.3, 1.6]} />
+        <meshToonMaterial color="#a8dadc" />
+      </mesh>
+    )
   }
 
   return (
