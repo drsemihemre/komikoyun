@@ -122,6 +122,11 @@ export default function Player() {
       launch: (impulse) => {
         pendingLaunch.current = impulse
       },
+      teleportTo: (x, y, z) => {
+        if (!body.current) return
+        body.current.setTranslation({ x, y, z }, true)
+        body.current.setLinvel({ x: 0, y: 0, z: 0 }, true)
+      },
       reset: () => {
         if (!body.current) return
         body.current.setTranslation({ x: 0, y: 3, z: 0 }, true)
@@ -285,6 +290,28 @@ export default function Player() {
     const keys = getKeys()
     const now = state.clock.elapsedTime
 
+    // Kartta ise: oyuncu hareketini ve yumruk/silah atla, sadece kamera takibi
+    const isDriving = useGameStore.getState().drivingKart !== null
+    if (isDriving) {
+      const pos = body.current.translation()
+      if (cameraMode !== 'first') {
+        const camHeight = 6 + scale * 1.2
+        const camBack = 12 + scale * 1.8
+        camDesired.current.set(pos.x, pos.y + camHeight, pos.z + camBack)
+        state.camera.position.lerp(
+          camDesired.current,
+          1 - Math.exp(-6 * delta)
+        )
+        camLookAt.current.set(pos.x, pos.y + 1.2 * scale, pos.z)
+        camCurrentLook.current.lerp(
+          camLookAt.current,
+          1 - Math.exp(-10 * delta)
+        )
+        state.camera.lookAt(camCurrentLook.current)
+      }
+      return
+    }
+
     // Oyun duraklatıldı veya başlamadıysa: sadece kamera takibini koru, mantığı atla
     if (paused || !gameStarted) {
       const pos = body.current.translation()
@@ -404,15 +431,12 @@ export default function Player() {
           isRagdoll.current = false
           settleStartT.current = 0
           body.current.setEnabledRotations(false, false, false, true)
-          body.current.setRotation(
-            {
-              x: 0,
-              y: Math.sin(currentYaw.current / 2),
-              z: 0,
-              w: Math.cos(currentYaw.current / 2),
-            },
-            true
-          )
+          // Body identity — visualRoot yaw controls facing direction
+          body.current.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true)
+          body.current.setAngvel({ x: 0, y: 0, z: 0 }, true)
+          // Yaw'ı mevcut harekete göre sıfırla (kontrol geri gelsin)
+          currentYaw.current = 0
+          targetYaw.current = 0
           body.current.setTranslation(
             { x: pos.x, y: pos.y + 0.4 * scale, z: pos.z },
             true
@@ -839,9 +863,44 @@ export default function Player() {
               <sphereGeometry args={[0.04, 8, 8]} />
               <meshBasicMaterial color="#ffffff" />
             </mesh>
-            <mesh position={[0, -0.05, 0.62]} rotation={[0.2, 0, 0]}>
-              <torusGeometry args={[0.22, 0.05, 6, 14, Math.PI]} />
+            {/* Komik kocaman gülümseme */}
+            <mesh position={[0, -0.08, 0.72]} rotation={[Math.PI, 0, 0]}>
+              <torusGeometry args={[0.28, 0.07, 8, 20, Math.PI]} />
               <meshBasicMaterial color="#b23a48" />
+            </mesh>
+            {/* Dil — komik ufak pembe */}
+            <mesh position={[0.05, -0.2, 0.76]}>
+              <sphereGeometry args={[0.12, 12, 10]} />
+              <meshBasicMaterial color="#ff6b9d" />
+            </mesh>
+            {/* Tek komik diş */}
+            <mesh position={[-0.08, -0.06, 0.78]}>
+              <boxGeometry args={[0.07, 0.12, 0.03]} />
+              <meshBasicMaterial color="#ffffff" />
+            </mesh>
+            {/* Sol kaş yukarı, sağ kaş aşağı — komik şaşkın ifade */}
+            <mesh
+              position={[0.28, 0.45, 0.55]}
+              rotation={[0, 0, -0.4]}
+            >
+              <boxGeometry args={[0.22, 0.08, 0.05]} />
+              <meshBasicMaterial color="#3d2817" />
+            </mesh>
+            <mesh
+              position={[-0.28, 0.4, 0.55]}
+              rotation={[0, 0, 0.25]}
+            >
+              <boxGeometry args={[0.22, 0.08, 0.05]} />
+              <meshBasicMaterial color="#3d2817" />
+            </mesh>
+            {/* Yanak rengi — sağlık göstergesi */}
+            <mesh position={[0.35, -0.02, 0.55]}>
+              <sphereGeometry args={[0.11, 10, 10]} />
+              <meshBasicMaterial color="#ff8fab" transparent opacity={0.7} />
+            </mesh>
+            <mesh position={[-0.35, -0.02, 0.55]}>
+              <sphereGeometry args={[0.11, 10, 10]} />
+              <meshBasicMaterial color="#ff8fab" transparent opacity={0.7} />
             </mesh>
           </group>
           <group ref={leftArm} position={[0.55, 0.25, 0]}>

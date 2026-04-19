@@ -10,29 +10,53 @@ type Props = {
   ambientRef: React.RefObject<AmbientLight | null>
 }
 
-// Gerçek yerel saati güne göre sun konumuna eşle
-// 6:00 = doğu ufku, 12:00 = zenit, 18:00 = batı ufku, 00:00 = anti-zenit
-function sunPositionFromLocalTime(): [number, number, number] {
-  const now = new Date()
-  const h = now.getHours() + now.getMinutes() / 60 + now.getSeconds() / 3600
-  // Map hour 0-24 to angle around horizon circle
-  // 6am → angle 0 (east), 12pm → angle π/2 (up), 6pm → π, 12am → 3π/2 (down)
-  const angle = ((h - 6) / 24) * Math.PI * 2
+// Hızlandırılmış döngü: 24 gerçek dakika = 1 oyun günü (24 saat)
+// Başlangıç oyun saati = o anki yerel saat, sonra 60× hızla ilerle
+let mountedAtMs: number | null = null
+let startHour = 10
+
+function ensureMounted() {
+  if (mountedAtMs === null) {
+    mountedAtMs = Date.now()
+    const now = new Date()
+    startHour = now.getHours() + now.getMinutes() / 60
+  }
+}
+
+function currentGameHour(): number {
+  ensureMounted()
+  const elapsedMin = (Date.now() - (mountedAtMs ?? 0)) / 60000
+  // 1 gerçek dakika = 1 oyun saati
+  return ((startHour + elapsedMin) % 24 + 24) % 24
+}
+
+function sunPositionFromGameTime(): [number, number, number] {
+  const h = currentGameHour()
+  let angle: number
+  if (h >= 6 && h <= 20) {
+    const progress = (h - 6) / 14
+    angle = progress * Math.PI
+  } else {
+    const nightH = h < 6 ? h + 4 : h - 20
+    const progress = nightH / 10
+    angle = Math.PI + progress * Math.PI
+  }
   const sunX = Math.cos(angle) * 80
   const sunY = Math.sin(angle) * 80
-  const sunZ = 30 + Math.sin(angle * 0.5) * 15 // slight Z variation
-  return [sunX, sunY, sunZ]
+  return [sunX, sunY, 30]
 }
 
 export default function DayNightCycle({ dirLightRef, ambientRef }: Props) {
   const [sunPos, setSunPos] = useState<[number, number, number]>(() =>
-    sunPositionFromLocalTime()
+    sunPositionFromGameTime()
   )
+  const [gameHour, setGameHour] = useState(() => currentGameHour())
 
   useEffect(() => {
     const id = setInterval(() => {
-      setSunPos(sunPositionFromLocalTime())
-    }, 5000) // Güneş her 5 saniyede bir güncellenir (smooth)
+      setSunPos(sunPositionFromGameTime())
+      setGameHour(currentGameHour())
+    }, 1500)
     return () => clearInterval(id)
   }, [])
 
@@ -86,6 +110,19 @@ export default function DayNightCycle({ dirLightRef, ambientRef }: Props) {
           speed={0.3}
         />
       )}
+      {/* Game hour export to other components (Mosque etc.) */}
+      <GameClock gameHour={gameHour} />
     </>
   )
+}
+
+// Oyun saati'ni tüm dünyaya yayın — mosque, NPC'ler vs. kullanabilir
+let lastGameHour = 10
+export function getGameHour() {
+  return lastGameHour
+}
+
+function GameClock({ gameHour }: { gameHour: number }) {
+  lastGameHour = gameHour
+  return null
 }

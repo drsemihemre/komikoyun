@@ -281,7 +281,13 @@ export default function Creature({
       const sp = Math.hypot(linvel.x, linvel.y, linvel.z)
       const recoverTime = hp.current <= 0 ? 4 : 1.8
       if (sp < 0.8 && now - ragdollStartT.current > recoverTime) {
-        if (hp.current <= 0) {
+        const pos = body.current.translation()
+        const dc = Math.hypot(
+          pos.x - arenaCenter[0],
+          pos.z - arenaCenter[2]
+        )
+        // Arena dışına savruldu veya KO → arenanın ortasına respawn
+        if (hp.current <= 0 || dc > arenaRadius) {
           hp.current = variant.hp
           const ang = Math.random() * Math.PI * 2
           const r = Math.random() * (arenaRadius - 3)
@@ -548,27 +554,45 @@ function CreatureMesh({
         <meshToonMaterial color={color} />
       </mesh>
 
-      <mesh position={[0.16, shape === 'tank' ? 0.85 : 0.82, 0.32]}>
-        <sphereGeometry args={[0.14, 12, 12]} />
-        <meshBasicMaterial color="white" />
-      </mesh>
-      <mesh position={[-0.16, shape === 'tank' ? 0.85 : 0.82, 0.32]}>
-        <sphereGeometry args={[0.14, 12, 12]} />
-        <meshBasicMaterial color="white" />
-      </mesh>
-      <mesh position={[0.18, shape === 'tank' ? 0.87 : 0.84, 0.42]}>
-        <sphereGeometry args={[0.07, 10, 10]} />
-        <meshBasicMaterial color="black" />
-      </mesh>
-      <mesh position={[-0.14, shape === 'tank' ? 0.83 : 0.8, 0.42]}>
-        <sphereGeometry args={[0.07, 10, 10]} />
-        <meshBasicMaterial color="black" />
-      </mesh>
-
-      <mesh position={[0, shape === 'tank' ? 0.6 : 0.58, 0.4]}>
-        <sphereGeometry args={[shape === 'tank' ? 0.11 : 0.08, 8, 8]} />
-        <meshBasicMaterial color="#1a1a1a" />
-      </mesh>
+      {/* Yüz — tank için daha dışarı (büyük kafaya uygun) */}
+      {(() => {
+        const faceOut = shape === 'tank' ? 0.5 : 0.32
+        const eyeY = shape === 'tank' ? 0.88 : 0.82
+        const eyeSpread = shape === 'tank' ? 0.22 : 0.16
+        const pupilOut = shape === 'tank' ? 0.62 : 0.42
+        const mouthY = shape === 'tank' ? 0.6 : 0.58
+        const mouthOut = shape === 'tank' ? 0.55 : 0.4
+        return (
+          <>
+            <mesh position={[eyeSpread, eyeY, faceOut]}>
+              <sphereGeometry
+                args={[shape === 'tank' ? 0.18 : 0.14, 12, 12]}
+              />
+              <meshBasicMaterial color="white" />
+            </mesh>
+            <mesh position={[-eyeSpread, eyeY, faceOut]}>
+              <sphereGeometry
+                args={[shape === 'tank' ? 0.18 : 0.14, 12, 12]}
+              />
+              <meshBasicMaterial color="white" />
+            </mesh>
+            <mesh position={[eyeSpread + 0.02, eyeY + 0.02, pupilOut]}>
+              <sphereGeometry args={[0.09, 10, 10]} />
+              <meshBasicMaterial color="black" />
+            </mesh>
+            <mesh position={[-eyeSpread + 0.02, eyeY - 0.02, pupilOut]}>
+              <sphereGeometry args={[0.09, 10, 10]} />
+              <meshBasicMaterial color="black" />
+            </mesh>
+            <mesh position={[0, mouthY, mouthOut]}>
+              <sphereGeometry
+                args={[shape === 'tank' ? 0.13 : 0.08, 8, 8]}
+              />
+              <meshBasicMaterial color="#1a1a1a" />
+            </mesh>
+          </>
+        )
+      })()}
 
       {shape === 'horned' && (
         <>

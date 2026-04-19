@@ -33,6 +33,7 @@ type GameState = {
   gameStarted: boolean
   paused: boolean
   resetNonce: number
+  drivingKart: string | null
   // Surprise potions
   jumpBoostUntil: number // AudioContext / performance time (s) when boost ends
   teleportCharges: number
@@ -59,6 +60,7 @@ type GameState = {
   setPaused: (b: boolean) => void
   togglePause: () => void
   resetGame: () => void
+  setDrivingKart: (id: string | null) => void
   activateJumpBoost: (durationSec: number) => void
   grantTeleport: (charges: number) => void
   consumeTeleport: () => boolean
@@ -67,7 +69,7 @@ type GameState = {
 
 const SCALE_FACTOR = 1.12
 const SCALE_MIN = 0.25
-const SCALE_MAX = 12
+const SCALE_MAX = 50
 const SPEED_FACTOR = 1.1
 const SPEED_MIN = 0.3
 const SPEED_MAX = 3.5
@@ -107,6 +109,7 @@ export const useGameStore = create<GameState>((set) => ({
   gameStarted: false,
   paused: false,
   resetNonce: 0,
+  drivingKart: null,
   jumpBoostUntil: 0,
   teleportCharges: 0,
   pendingTeleport: null,
@@ -204,6 +207,7 @@ export const useGameStore = create<GameState>((set) => ({
   setGameStarted: (gameStarted) => set({ gameStarted }),
   setPaused: (paused) => set({ paused }),
   togglePause: () => set((s) => ({ paused: !s.paused })),
+  setDrivingKart: (drivingKart) => set({ drivingKart }),
   resetGame: () =>
     set((s) => ({
       hitCount: 0,

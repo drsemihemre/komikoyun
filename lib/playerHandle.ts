@@ -1,13 +1,10 @@
-// Tek oyuncu dünyasında oyuncuya global erişim sağlar —
-// yaratıklar oyuncu konumunu sorgulayıp saldırabilsin diye
-// Mancınık ve reset gibi dış etkiler Player'a kumanda edebilsin diye
-
 export type PlayerHandle = {
   getPos: () => { x: number; y: number; z: number } | null
   takeHit: (damage: number, knockbackDir: [number, number, number]) => void
   isDown: () => boolean
   launch: (impulse: [number, number, number]) => void
   reset: () => void
+  teleportTo: (x: number, y: number, z: number) => void
 }
 
 let handle: PlayerHandle | null = null

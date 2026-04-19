@@ -2,7 +2,6 @@
 
 import Ground from './Ground'
 import Boundary from './Boundary'
-import Building from './Building'
 import SpiralStairs from './SpiralStairs'
 import SafeZone from './SafeZone'
 import Arena from './Arena'
@@ -21,6 +20,10 @@ import Lake from './Lake'
 import SurprisePotions from './SurprisePotions'
 import Mosque from './Mosque'
 import GoKartTrack from './GoKartTrack'
+import MarioPipes from './MarioPipes'
+import Residents from './Residents'
+import SkyTraffic from './SkyTraffic'
+import DriveableKart from './DriveableKart'
 import { useGameStore } from '@/lib/store'
 
 export default function World() {
@@ -45,7 +48,10 @@ export default function World() {
       <Mosque />
       <GoKartTrack />
       <SurprisePotions />
-      <Building position={[18, 0, -6]} height={24} />
+      <MarioPipes />
+      <Residents />
+      <SkyTraffic />
+      <DriveableKart />
       <SpiralStairs position={[-16, 0, -4]} height={16} />
       <HitParticles />
     </>

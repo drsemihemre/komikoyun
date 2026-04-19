@@ -21,7 +21,7 @@ const SPAWNS: PotionSpawn[] = [
   { id: 'j1', position: [8, 1.2, 0], kind: 'jump' },
   { id: 'j2', position: [-16, 16.4, -4], kind: 'jump' },
   { id: 'j3', position: [42, 1.2, 18], kind: 'jump' },
-  { id: 'j4', position: [18, 24.4, -6], kind: 'jump' },
+  { id: 'j4', position: [0, 30, -70], kind: 'jump' }, // balon sarayında
   // Teleport potions (mor)
   { id: 't1', position: [12, 1.2, 26], kind: 'teleport' },
   { id: 't2', position: [-15, 1.2, 85], kind: 'teleport' },

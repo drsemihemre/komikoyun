@@ -631,7 +631,8 @@ export function startMusic() {
   if (!c) return
   if (!musicGain) {
     musicGain = c.createGain()
-    musicGain.gain.value = 0.8
+    // Silah ses efektleri öne çıksın diye müzik kısıldı
+    musicGain.gain.value = 0.3
     musicGain.connect(masterGain ?? c.destination)
   }
   musicPlaying = true
@@ -650,7 +651,7 @@ export function stopMusic() {
 
 export function setMusicEnabled(on: boolean) {
   if (!musicGain) return
-  musicGain.gain.value = on ? 0.8 : 0
+  musicGain.gain.value = on ? 0.3 : 0
 }
 
 let musicEnabledFlag = true
