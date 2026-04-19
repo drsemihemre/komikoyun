@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useGameStore, PLAYER_HP_MAX } from '@/lib/store'
 import { setMuted, isMuted, toggleMusic, isMusicEnabled } from '@/lib/sounds'
+import { WEAPONS, getWeapon } from '@/lib/weapons'
 
 export default function HUD() {
   const isMobile = useGameStore((s) => s.isMobile)
@@ -17,6 +18,8 @@ export default function HUD() {
   const gameStarted = useGameStore((s) => s.gameStarted)
   const jumpBoostUntil = useGameStore((s) => s.jumpBoostUntil)
   const teleportCharges = useGameStore((s) => s.teleportCharges)
+  const currentWeapon = useGameStore((s) => s.currentWeapon)
+  const cycleWeapon = useGameStore((s) => s.cycleWeapon)
 
   const [pointerLocked, setPointerLocked] = useState(false)
   const [muted, setMutedLocal] = useState(false)
@@ -234,6 +237,36 @@ export default function HUD() {
         )}
       </div>
 
+      {/* Current weapon badge — bottom center */}
+      <div className="pointer-events-auto absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 rounded-2xl bg-black/50 px-4 py-2 text-white shadow-xl backdrop-blur-sm">
+        <button
+          onClick={() => cycleWeapon()}
+          onTouchStart={(e) => {
+            e.preventDefault()
+            cycleWeapon()
+          }}
+          className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-lg transition hover:bg-white/20 active:scale-95"
+          title="Silah değiştir (X)"
+        >
+          🔄
+        </button>
+        <div className="flex flex-col">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xl">{getWeapon(currentWeapon).emoji}</span>
+            <span className="text-sm font-bold">
+              {getWeapon(currentWeapon).name}
+            </span>
+          </div>
+          <div className="mt-0.5 text-[10px] opacity-60">
+            {WEAPONS.findIndex((w) => w.id === currentWeapon) + 1} /{' '}
+            {WEAPONS.length}
+            {!isMobile && (
+              <span className="ml-2">X=döngü · R=ateşle</span>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* New high score toast */}
       {showCongrats && (
         <div className="pointer-events-none absolute left-1/2 top-32 -translate-x-1/2 rounded-2xl bg-gradient-to-r from-yellow-400 to-orange-500 px-6 py-3 text-center text-white shadow-2xl animate-pulse">
@@ -264,9 +297,11 @@ export default function HUD() {
           <div className="mt-1 text-xs leading-5 opacity-80">
             W A S D — Hareket · Space — Zıpla
             <br />
-            F / Q — Vur 👊 · V — Kamera
+            F / Q — Yumruk 👊 · R — Silah 🔫
             <br />
-            1-4 — İksir · 0 — Sıfırla
+            X — Silah değiştir · V — Kamera
+            <br />
+            1-4 — İksir · T — Işınlan
           </div>
         </div>
       )}

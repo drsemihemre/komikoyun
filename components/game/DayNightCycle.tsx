@@ -1,75 +1,65 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Sky, Stars } from '@react-three/drei'
 import type { DirectionalLight, AmbientLight } from 'three'
 
 type Props = {
-  cycleSeconds?: number
   dirLightRef: React.RefObject<DirectionalLight | null>
   ambientRef: React.RefObject<AmbientLight | null>
 }
 
-export default function DayNightCycle({
-  cycleSeconds = 180,
-  dirLightRef,
-  ambientRef,
-}: Props) {
-  // Sun position güncellemesi çok sık rerender etmesin — her 400ms
-  const [sunPos, setSunPos] = useState<[number, number, number]>([80, 55, 60])
-  const startT = useRef<number | null>(null)
+// Gerçek yerel saati güne göre sun konumuna eşle
+// 6:00 = doğu ufku, 12:00 = zenit, 18:00 = batı ufku, 00:00 = anti-zenit
+function sunPositionFromLocalTime(): [number, number, number] {
+  const now = new Date()
+  const h = now.getHours() + now.getMinutes() / 60 + now.getSeconds() / 3600
+  // Map hour 0-24 to angle around horizon circle
+  // 6am → angle 0 (east), 12pm → angle π/2 (up), 6pm → π, 12am → 3π/2 (down)
+  const angle = ((h - 6) / 24) * Math.PI * 2
+  const sunX = Math.cos(angle) * 80
+  const sunY = Math.sin(angle) * 80
+  const sunZ = 30 + Math.sin(angle * 0.5) * 15 // slight Z variation
+  return [sunX, sunY, sunZ]
+}
+
+export default function DayNightCycle({ dirLightRef, ambientRef }: Props) {
+  const [sunPos, setSunPos] = useState<[number, number, number]>(() =>
+    sunPositionFromLocalTime()
+  )
 
   useEffect(() => {
-    startT.current = performance.now() / 1000 - cycleSeconds * 0.15 // başlangıçta biraz öğleye doğru
     const id = setInterval(() => {
-      const now = performance.now() / 1000
-      const t = (now - (startT.current ?? 0)) / cycleSeconds
-      // 0 = doğu, 0.25 = zenit, 0.5 = batı, 0.75 = gece
-      const angle = (t % 1) * Math.PI * 2
-      const sunY = Math.sin(angle) * 80
-      const sunX = Math.cos(angle) * 80
-      setSunPos([sunX, sunY, sunY * 0.3 + 30])
-    }, 400)
+      setSunPos(sunPositionFromLocalTime())
+    }, 5000) // Güneş her 5 saniyede bir güncellenir (smooth)
     return () => clearInterval(id)
-  }, [cycleSeconds])
+  }, [])
 
-  // Işıklandırma + yön animasyonu (frame-wise)
   useFrame(() => {
     const dir = dirLightRef.current
     const amb = ambientRef.current
     if (!dir || !amb) return
-    // Sun height ratio: 1 zenith, -1 subsun
     const sunY = sunPos[1]
-    const altitude = sunY / 80 // -1 to 1
-    const daylight = Math.max(0, altitude) // 0 at horizon/night, 1 at noon
+    const altitude = sunY / 80
+    const daylight = Math.max(0, altitude)
     const isNight = altitude < -0.1
 
-    // Directional light intensity + color
-    const dirIntensity = daylight * 1.3 + 0.05
-    dir.intensity = dirIntensity
-
     if (isNight) {
-      // Cool moonlight
       dir.color.setRGB(0.55, 0.65, 0.9)
       dir.intensity = 0.25
-    } else if (altitude < 0.2) {
-      // Golden hour — warm
-      dir.color.setRGB(1, 0.75, 0.5)
-    } else {
-      // Midday — white
-      dir.color.setRGB(1, 0.98, 0.93)
-    }
-
-    // Ambient
-    amb.intensity = 0.25 + daylight * 0.7
-    if (isNight) {
       amb.color.setRGB(0.35, 0.4, 0.6)
-      amb.intensity = 0.25
+      amb.intensity = 0.3
     } else if (altitude < 0.2) {
+      dir.color.setRGB(1, 0.75, 0.5)
+      dir.intensity = daylight * 1.3 + 0.3
       amb.color.setRGB(1, 0.82, 0.7)
+      amb.intensity = 0.35 + daylight * 0.5
     } else {
+      dir.color.setRGB(1, 0.98, 0.93)
+      dir.intensity = daylight * 1.3 + 0.1
       amb.color.setRGB(1, 1, 1)
+      amb.intensity = 0.3 + daylight * 0.6
     }
   })
 
@@ -80,20 +70,20 @@ export default function DayNightCycle({
     <>
       <Sky
         sunPosition={sunPos}
-        turbidity={isNight ? 8 : 2}
+        turbidity={isNight ? 10 : 2}
         rayleigh={isNight ? 0.1 : 0.5}
         mieCoefficient={0.005}
         mieDirectionalG={0.8}
       />
       {isNight && (
         <Stars
-          radius={120}
-          depth={50}
+          radius={140}
+          depth={60}
           count={1500}
-          factor={4}
+          factor={5}
           saturation={0}
           fade
-          speed={0.5}
+          speed={0.3}
         />
       )}
     </>

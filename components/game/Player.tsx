@@ -12,9 +12,21 @@ import { MathUtils, Vector3, type Group } from 'three'
 import { useGameStore, SAFE_ZONE, PLAYER_HP_MAX } from '@/lib/store'
 import { getCreatures } from '@/lib/creatureRegistry'
 import { registerPlayer, unregisterPlayer } from '@/lib/playerHandle'
-import { playJump, playLand, playHit, playDamage, playLaunch } from '@/lib/sounds'
+import {
+  playJump,
+  playLand,
+  playHit,
+  playDamage,
+  playLaunch,
+  playFart,
+  playWaterGun,
+  playVacuum,
+  playTeleportGun,
+  playBalloonGun,
+} from '@/lib/sounds'
 import { spawnImpact } from '@/lib/particles'
 import { TELEPORT_POINTS } from './SurprisePotions'
+import { getWeapon, type WeaponId } from '@/lib/weapons'
 
 const BASE_SPEED = 10
 const JUMP = 13
@@ -65,7 +77,9 @@ export default function Player() {
 
   const attackProgress = useRef(-1)
   const lastAttackT = useRef(0)
+  const lastWeaponFireT = useRef(0)
   const wasAttackPressed = useRef(false)
+  const wasWeaponFirePressed = useRef(false)
 
   // FPV mouse look
   const mouseYaw = useRef(0)
@@ -74,6 +88,7 @@ export default function Player() {
   const [, getKeys] = useKeyboardControls()
   const scale = useGameStore((s) => s.scale)
   const cameraMode = useGameStore((s) => s.cameraMode)
+  const currentWeapon = useGameStore((s) => s.currentWeapon)
 
   // Register player handle for creatures to attack us
   useEffect(() => {
@@ -128,6 +143,20 @@ export default function Player() {
     })
     return () => unregisterPlayer()
   }, [scale])
+
+  // Keyboard X → cycle weapon
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'x' && e.key !== 'X' && e.key !== 'Tab') return
+      if (e.repeat) return
+      if (e.key === 'Tab') e.preventDefault()
+      const state = useGameStore.getState()
+      if (!state.gameStarted || state.paused) return
+      state.cycleWeapon()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
 
   // Keyboard T → teleport (consume charge, random destination)
   useEffect(() => {
@@ -494,6 +523,103 @@ export default function Player() {
           }
         }
       }
+
+      // WEAPON FIRE (R key / mobile fire button) — current weapon
+      const weaponHeld =
+        (keys as Record<string, boolean>).weaponFire ||
+        useGameStore.getState().mobileWeaponFire
+      const weaponEdge = weaponHeld && !wasWeaponFirePressed.current
+      wasWeaponFirePressed.current = weaponHeld
+
+      if (weaponEdge && currentWeapon !== 'fist') {
+        const w = getWeapon(currentWeapon)
+        if (now - lastWeaponFireT.current > w.cooldown) {
+          const dxS = pos.x - SAFE_ZONE.center[0]
+          const dzS = pos.z - SAFE_ZONE.center[2]
+          const inSafe = Math.hypot(dxS, dzS) < SAFE_ZONE.radius
+          if (!inSafe) {
+            lastWeaponFireT.current = now
+            attackProgress.current = 0
+
+            const fwdX = Math.sin(currentYaw.current)
+            const fwdZ = Math.cos(currentYaw.current)
+            const fwdY = cameraMode === 'first' ? -mousePitch.current * 0.3 : 0
+
+            // Fire sound
+            if (currentWeapon === 'water') playWaterGun()
+            else if (currentWeapon === 'fart') playFart()
+            else if (currentWeapon === 'teleportGun') playTeleportGun()
+            else if (currentWeapon === 'vacuum') playVacuum()
+            else if (currentWeapon === 'balloon') playBalloonGun()
+
+            // Muzzle flash at player's hand position
+            const muzzleX = pos.x + fwdX * 0.8
+            const muzzleY = pos.y + 0.4 * scale
+            const muzzleZ = pos.z + fwdZ * 0.8
+            spawnImpact(muzzleX, muzzleY, muzzleZ, w.color, 0.5)
+
+            // Projectile trail — chain of small impacts along trajectory
+            if (w.isRanged) {
+              const steps = 6
+              for (let i = 1; i <= steps; i++) {
+                const t = i / steps
+                const tx = muzzleX + fwdX * w.range * t
+                const ty = muzzleY + fwdY * w.range * t
+                const tz = muzzleZ + fwdZ * w.range * t
+                setTimeout(
+                  () => spawnImpact(tx, ty, tz, w.color, 0.35 + t * 0.3),
+                  i * 30
+                )
+              }
+            }
+
+            // Hit detection — creatures in cone within range
+            let hits = 0
+            for (const c of getCreatures()) {
+              const cp = c.getPos()
+              if (!cp) continue
+              const ddx = cp.x - pos.x
+              const ddz = cp.z - pos.z
+              const dist = Math.hypot(ddx, ddz)
+              if (dist > w.range || dist < 0.2) continue
+              const ndx = ddx / dist
+              const ndz = ddz / dist
+              const dot = ndx * fwdX + ndz * fwdZ
+              if (dot < 0.5) continue
+
+              const hitForce = 22 * scale
+              switch (currentWeapon) {
+                case 'water':
+                  c.melt()
+                  spawnImpact(cp.x, cp.y + 0.5, cp.z, w.color, 1.3)
+                  break
+                case 'fart':
+                  c.takeHit([
+                    ndx * hitForce * 1.6,
+                    12 * scale,
+                    ndz * hitForce * 1.6,
+                  ])
+                  spawnImpact(cp.x, cp.y + 0.5, cp.z, w.color, 1.1)
+                  break
+                case 'teleportGun':
+                  c.teleportAway()
+                  spawnImpact(cp.x, cp.y + 0.5, cp.z, w.color, 1.4)
+                  break
+                case 'vacuum':
+                  c.suckAndLaunch(pos.x, pos.z)
+                  spawnImpact(cp.x, cp.y + 0.5, cp.z, w.color, 1.2)
+                  break
+                case 'balloon':
+                  c.balloonify()
+                  spawnImpact(cp.x, cp.y + 0.5, cp.z, w.color, 1.3)
+                  break
+              }
+              hits++
+            }
+            if (hits > 0) useGameStore.getState().incrementHitCount()
+          }
+        }
+      }
     }
 
     // Tick attack animation
@@ -729,6 +855,7 @@ export default function Player() {
               <capsuleGeometry args={[0.13, 0.4, 6, 10]} />
               <meshToonMaterial color="#ef476f" />
             </mesh>
+            <WeaponMesh id={currentWeapon} />
           </group>
           <group ref={leftLeg} position={[0.22, -0.5, 0]}>
             <mesh position={[0, -0.3, 0]} castShadow>
@@ -759,4 +886,129 @@ export default function Player() {
 function lerpAngle(a: number, b: number, t: number) {
   const diff = MathUtils.euclideanModulo(b - a + Math.PI, Math.PI * 2) - Math.PI
   return a + diff * t
+}
+
+// Sağ elde tutulan silah görseli — currentWeapon'a göre şekil değişir
+function WeaponMesh({ id }: { id: WeaponId }) {
+  // Position: arm'ın altında el seviyesi; namlu ileri doğru
+  // Arm group at [-0.55, 0.25, 0], mesh at [0, -0.25, 0] → hand at local [0, -0.4, 0]
+  const basePos: [number, number, number] = [0, -0.5, 0.3]
+
+  if (id === 'fist') return null
+
+  if (id === 'water') {
+    return (
+      <group position={basePos} rotation={[0.4, 0, 0]}>
+        {/* Tank */}
+        <mesh castShadow>
+          <boxGeometry args={[0.22, 0.32, 0.4]} />
+          <meshToonMaterial color="#4cc9f0" />
+        </mesh>
+        {/* Barrel */}
+        <mesh position={[0, 0, 0.35]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.05, 0.07, 0.5, 10]} />
+          <meshToonMaterial color="#1a5e8f" />
+        </mesh>
+        {/* Water window */}
+        <mesh position={[0, 0.05, -0.15]}>
+          <boxGeometry args={[0.12, 0.15, 0.08]} />
+          <meshBasicMaterial color="#a8dadc" />
+        </mesh>
+      </group>
+    )
+  }
+
+  if (id === 'fart') {
+    return (
+      <group position={basePos} rotation={[0.3, 0, 0]}>
+        <mesh castShadow>
+          <boxGeometry args={[0.2, 0.25, 0.35]} />
+          <meshToonMaterial color="#a8e10c" />
+        </mesh>
+        {/* Dark nozzle */}
+        <mesh position={[0, 0, 0.3]} rotation={[Math.PI / 2, 0, 0]}>
+          <coneGeometry args={[0.12, 0.3, 10]} />
+          <meshToonMaterial color="#2d3436" />
+        </mesh>
+        {/* Green cloud bauble */}
+        <mesh position={[0, 0.15, -0.12]}>
+          <sphereGeometry args={[0.1, 10, 10]} />
+          <meshToonMaterial color="#a8e10c" />
+        </mesh>
+      </group>
+    )
+  }
+
+  if (id === 'teleportGun') {
+    return (
+      <group position={basePos} rotation={[0.4, 0, 0]}>
+        <mesh castShadow>
+          <boxGeometry args={[0.25, 0.3, 0.35]} />
+          <meshToonMaterial color="#c77dff" />
+        </mesh>
+        {/* Emitter ring */}
+        <mesh position={[0, 0, 0.3]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.15, 0.04, 6, 14]} />
+          <meshStandardMaterial
+            color="#c77dff"
+            emissive="#c77dff"
+            emissiveIntensity={1.5}
+          />
+        </mesh>
+        {/* Glow core */}
+        <mesh position={[0, 0, 0.3]}>
+          <sphereGeometry args={[0.08, 10, 10]} />
+          <meshStandardMaterial
+            color="#ffffff"
+            emissive="#c77dff"
+            emissiveIntensity={2}
+          />
+        </mesh>
+      </group>
+    )
+  }
+
+  if (id === 'vacuum') {
+    return (
+      <group position={basePos} rotation={[0.35, 0, 0]}>
+        <mesh castShadow>
+          <boxGeometry args={[0.26, 0.3, 0.4]} />
+          <meshToonMaterial color="#4a5568" />
+        </mesh>
+        {/* Hose */}
+        <mesh position={[0, 0, 0.3]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.13, 0.2, 0.4, 12]} />
+          <meshToonMaterial color="#1a202c" />
+        </mesh>
+        {/* Intake ring */}
+        <mesh position={[0, 0, 0.5]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.2, 0.04, 6, 14]} />
+          <meshToonMaterial color="#718096" />
+        </mesh>
+      </group>
+    )
+  }
+
+  if (id === 'balloon') {
+    return (
+      <group position={basePos} rotation={[0.4, 0, 0]}>
+        <mesh castShadow>
+          <boxGeometry args={[0.22, 0.3, 0.35]} />
+          <meshToonMaterial color="#ff6b9d" />
+        </mesh>
+        {/* Barrel wider at tip */}
+        <mesh position={[0, 0, 0.32]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.12, 0.06, 0.3, 10]} />
+          <meshToonMaterial color="#ffafcc" />
+        </mesh>
+        {/* Tiny balloon loaded */}
+        <mesh position={[0, 0.02, 0.42]}>
+          <sphereGeometry args={[0.08, 8, 8]} />
+          <meshToonMaterial color="#ffd166" />
+        </mesh>
+      </group>
+    )
+  }
+
+  return null
 }

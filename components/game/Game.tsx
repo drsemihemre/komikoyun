@@ -16,7 +16,7 @@ import StartScreen from '../ui/StartScreen'
 import PauseMenu from '../ui/PauseMenu'
 import { useGameStore } from '@/lib/store'
 import { getPlayerPos } from '@/lib/playerHandle'
-import { startMusic } from '@/lib/sounds'
+import { startMusic, startAmbient } from '@/lib/sounds'
 
 const controlKeys = [
   { name: 'forward', keys: ['ArrowUp', 'w', 'W'] },
@@ -25,6 +25,7 @@ const controlKeys = [
   { name: 'right', keys: ['ArrowRight', 'd', 'D'] },
   { name: 'jump', keys: ['Space'] },
   { name: 'attack', keys: ['f', 'F', 'q', 'Q'] },
+  { name: 'weaponFire', keys: ['r', 'R'] },
 ]
 
 function ShadowFollower({
@@ -64,7 +65,10 @@ export default function Game() {
   }, [setIsMobile])
 
   useEffect(() => {
-    const start = () => startMusic()
+    const start = () => {
+      startMusic()
+      startAmbient()
+    }
     document.addEventListener('pointerdown', start, { once: true })
     document.addEventListener('keydown', start, { once: true })
     document.addEventListener('touchstart', start, { once: true })
@@ -108,7 +112,6 @@ export default function Game() {
           <DayNightCycle
             dirLightRef={lightRef}
             ambientRef={ambientRef}
-            cycleSeconds={210}
           />
           <ambientLight ref={ambientRef} intensity={0.85} />
           <directionalLight

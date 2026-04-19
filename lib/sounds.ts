@@ -208,9 +208,191 @@ export function playDamage() {
   osc.stop(c.currentTime + 0.18)
 }
 
-// ─── Müzik sistemi: prosedürel ambient loop ───
-// Basit 4-akor progresyonu: C-G-Am-F (dört doğallı, pozitif his)
-// Her akor 8 vuruş (yaklaşık 5sn), toplam loop 32 vuruş
+// ─── SİLAH SESLERİ ───
+
+// Osuruk sesleri: her seferinde farklı — 20+ varyasyon random params'tan doğar
+export function playFart() {
+  const c = getCtx()
+  if (!c || muted) return
+
+  const baseFreq = 55 + Math.random() * 140 // 55-195 Hz
+  const duration = 0.08 + Math.random() * 0.28
+  const type: OscillatorType =
+    Math.random() > 0.55 ? 'sawtooth' : 'square'
+  const pitchMode = Math.floor(Math.random() * 4) // 0: flat, 1: fall, 2: wobble, 3: rise
+
+  const osc = c.createOscillator()
+  osc.type = type
+
+  const g = envelope(c, masterGain ?? c.destination, 0.002, duration, 0.28)
+  osc.connect(g)
+  osc.frequency.setValueAtTime(baseFreq, c.currentTime)
+
+  if (pitchMode === 1) {
+    osc.frequency.exponentialRampToValueAtTime(
+      baseFreq * 0.45,
+      c.currentTime + duration
+    )
+  } else if (pitchMode === 2) {
+    // Wobble: 3-5 pitch points
+    const points = 3 + Math.floor(Math.random() * 3)
+    for (let i = 1; i <= points; i++) {
+      const t = (i / points) * duration
+      const f = baseFreq * (0.6 + Math.random() * 0.9)
+      osc.frequency.linearRampToValueAtTime(f, c.currentTime + t)
+    }
+  } else if (pitchMode === 3) {
+    osc.frequency.exponentialRampToValueAtTime(
+      baseFreq * 1.8,
+      c.currentTime + duration
+    )
+  }
+
+  osc.start()
+  osc.stop(c.currentTime + duration + 0.02)
+
+  // İkinci harmonik — yağlı ses
+  if (Math.random() > 0.35) {
+    const osc2 = c.createOscillator()
+    osc2.type = Math.random() > 0.5 ? 'triangle' : 'sawtooth'
+    osc2.frequency.value = baseFreq * (1.5 + Math.random() * 2)
+    const g2 = envelope(c, masterGain ?? c.destination, 0.003, duration * 0.65, 0.12)
+    osc2.connect(g2)
+    osc2.start()
+    osc2.stop(c.currentTime + duration + 0.02)
+  }
+
+  // Noise burst — "pffft" dokusu
+  if (Math.random() > 0.4) {
+    const bufDur = 0.04 + Math.random() * 0.08
+    const buffer = c.createBuffer(1, Math.floor(c.sampleRate * bufDur), c.sampleRate)
+    const data = buffer.getChannelData(0)
+    for (let i = 0; i < data.length; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (data.length * 0.5))
+    }
+    const src = c.createBufferSource()
+    src.buffer = buffer
+    const filter = c.createBiquadFilter()
+    filter.type = 'bandpass'
+    filter.frequency.value = 120 + Math.random() * 400
+    filter.Q.value = 1.5
+    const g3 = envelope(c, masterGain ?? c.destination, 0.002, bufDur, 0.18)
+    src.connect(filter)
+    filter.connect(g3)
+    src.start()
+  }
+}
+
+// Su tabancası — sürekli "shhhhh" spray
+export function playWaterGun() {
+  const c = getCtx()
+  if (!c || muted) return
+  const dur = 0.35
+  const buffer = c.createBuffer(1, Math.floor(c.sampleRate * dur), c.sampleRate)
+  const data = buffer.getChannelData(0)
+  for (let i = 0; i < data.length; i++) {
+    data[i] = (Math.random() * 2 - 1) * (0.6 + Math.sin(i * 0.05) * 0.4)
+  }
+  const src = c.createBufferSource()
+  src.buffer = buffer
+  const filter = c.createBiquadFilter()
+  filter.type = 'highpass'
+  filter.frequency.value = 2000
+  filter.Q.value = 0.5
+  const g = envelope(c, masterGain ?? c.destination, 0.02, dur, 0.35)
+  src.connect(filter)
+  filter.connect(g)
+  src.start()
+
+  // Yüksek tiz çizgi — "pssst"
+  const osc = c.createOscillator()
+  osc.type = 'sawtooth'
+  osc.frequency.setValueAtTime(3000, c.currentTime)
+  osc.frequency.exponentialRampToValueAtTime(1500, c.currentTime + dur)
+  const og = envelope(c, masterGain ?? c.destination, 0.01, dur, 0.06)
+  osc.connect(og)
+  osc.start()
+  osc.stop(c.currentTime + dur + 0.05)
+}
+
+// Elektrik süpürgesi — uğultu
+export function playVacuum() {
+  const c = getCtx()
+  if (!c || muted) return
+  const dur = 0.6
+  // Heavy low-mid noise
+  const buffer = c.createBuffer(1, Math.floor(c.sampleRate * dur), c.sampleRate)
+  const data = buffer.getChannelData(0)
+  for (let i = 0; i < data.length; i++) {
+    data[i] = (Math.random() * 2 - 1) * 0.8
+  }
+  const src = c.createBufferSource()
+  src.buffer = buffer
+  const filter = c.createBiquadFilter()
+  filter.type = 'bandpass'
+  filter.frequency.setValueAtTime(180, c.currentTime)
+  filter.frequency.exponentialRampToValueAtTime(400, c.currentTime + dur)
+  filter.Q.value = 4
+  const g = envelope(c, masterGain ?? c.destination, 0.05, dur, 0.4)
+  src.connect(filter)
+  filter.connect(g)
+  src.start()
+
+  // Motor drone — sine düşük
+  const osc = c.createOscillator()
+  osc.type = 'sawtooth'
+  osc.frequency.setValueAtTime(90, c.currentTime)
+  const og = envelope(c, masterGain ?? c.destination, 0.03, dur, 0.18)
+  osc.connect(og)
+  osc.start()
+  osc.stop(c.currentTime + dur + 0.05)
+}
+
+// Işınlama silahı — zap elektroniği
+export function playTeleportGun() {
+  const c = getCtx()
+  if (!c || muted) return
+  const dur = 0.35
+  // Rising sweep
+  const osc = c.createOscillator()
+  osc.type = 'square'
+  osc.frequency.setValueAtTime(200, c.currentTime)
+  osc.frequency.exponentialRampToValueAtTime(4000, c.currentTime + dur * 0.7)
+  osc.frequency.exponentialRampToValueAtTime(1200, c.currentTime + dur)
+  const g = envelope(c, masterGain ?? c.destination, 0.005, dur, 0.25)
+  osc.connect(g)
+  osc.start()
+  osc.stop(c.currentTime + dur + 0.05)
+
+  // Sparkle overtone
+  const osc2 = c.createOscillator()
+  osc2.type = 'triangle'
+  osc2.frequency.setValueAtTime(3500, c.currentTime + 0.1)
+  osc2.frequency.linearRampToValueAtTime(6000, c.currentTime + dur)
+  const g2 = envelope(c, masterGain ?? c.destination, 0.02, dur * 0.7, 0.1)
+  osc2.connect(g2)
+  osc2.start(c.currentTime + 0.1)
+  osc2.stop(c.currentTime + dur + 0.05)
+}
+
+// Balon silahı — şişme ıslığı
+export function playBalloonGun() {
+  const c = getCtx()
+  if (!c || muted) return
+  const dur = 0.55
+  const osc = c.createOscillator()
+  osc.type = 'triangle'
+  osc.frequency.setValueAtTime(300, c.currentTime)
+  osc.frequency.linearRampToValueAtTime(900, c.currentTime + dur * 0.8)
+  osc.frequency.exponentialRampToValueAtTime(1400, c.currentTime + dur)
+  const g = envelope(c, masterGain ?? c.destination, 0.03, dur, 0.2)
+  osc.connect(g)
+  osc.start()
+  osc.stop(c.currentTime + dur + 0.05)
+}
+
+// ─── Müzik sistemi: geliştirilmiş prosedürel loop ───
+// 8 akor progresyon (double chorus), drums, daha neşeli BPM
 
 let musicPlaying = false
 let musicStartT = 0
@@ -218,16 +400,21 @@ let nextBeatT = 0
 let musicLoopId: number | undefined
 let musicGain: GainNode | null = null
 
-const BPM = 84
+const BPM = 108
 const BEAT = 60 / BPM
 
 type Chord = { root: number; third: number; fifth: number; seventh: number }
 
+// 8 chord progression: C - Am - F - G - Em - Am - Dm - G (ii-V-I hareketi)
 const CHORDS: Chord[] = [
   { root: 60, third: 64, fifth: 67, seventh: 71 }, // Cmaj7
-  { root: 67, third: 71, fifth: 74, seventh: 77 }, // Gmaj7
-  { root: 69, third: 72, fifth: 76, seventh: 79 }, // Amin7
+  { root: 69, third: 72, fifth: 76, seventh: 79 }, // Am7
   { root: 65, third: 69, fifth: 72, seventh: 76 }, // Fmaj7
+  { root: 67, third: 71, fifth: 74, seventh: 77 }, // G7
+  { root: 64, third: 67, fifth: 71, seventh: 74 }, // Em7
+  { root: 69, third: 72, fifth: 76, seventh: 79 }, // Am7
+  { root: 62, third: 65, fifth: 69, seventh: 72 }, // Dm7
+  { root: 67, third: 71, fifth: 74, seventh: 77 }, // G7
 ]
 
 const midiToFreq = (m: number) => 440 * Math.pow(2, (m - 69) / 12)
@@ -261,55 +448,163 @@ function musicEnvelope(
   osc.stop(startAt + duration + 0.02)
 }
 
+function playDrum(
+  c: AudioContext,
+  kind: 'kick' | 'snare' | 'hihat',
+  time: number
+) {
+  const dest = musicGain ?? c.destination
+  if (kind === 'kick') {
+    // Düşük sine + kısa noise click
+    const osc = c.createOscillator()
+    osc.type = 'sine'
+    osc.frequency.setValueAtTime(120, time)
+    osc.frequency.exponentialRampToValueAtTime(35, time + 0.14)
+    const g = c.createGain()
+    g.gain.setValueAtTime(0, time)
+    g.gain.linearRampToValueAtTime(0.42, time + 0.002)
+    g.gain.exponentialRampToValueAtTime(0.001, time + 0.18)
+    osc.connect(g)
+    g.connect(dest)
+    osc.start(time)
+    osc.stop(time + 0.2)
+  } else if (kind === 'snare') {
+    const buffer = c.createBuffer(1, Math.floor(c.sampleRate * 0.14), c.sampleRate)
+    const data = buffer.getChannelData(0)
+    for (let i = 0; i < data.length; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / 1400)
+    }
+    const src = c.createBufferSource()
+    src.buffer = buffer
+    const filter = c.createBiquadFilter()
+    filter.type = 'bandpass'
+    filter.frequency.value = 1800
+    filter.Q.value = 1.5
+    const g = c.createGain()
+    g.gain.setValueAtTime(0, time)
+    g.gain.linearRampToValueAtTime(0.25, time + 0.002)
+    g.gain.exponentialRampToValueAtTime(0.001, time + 0.14)
+    src.connect(filter)
+    filter.connect(g)
+    g.connect(dest)
+    src.start(time)
+    // Body thud
+    const osc = c.createOscillator()
+    osc.type = 'triangle'
+    osc.frequency.setValueAtTime(220, time)
+    osc.frequency.exponentialRampToValueAtTime(160, time + 0.08)
+    const og = c.createGain()
+    og.gain.setValueAtTime(0, time)
+    og.gain.linearRampToValueAtTime(0.12, time + 0.003)
+    og.gain.exponentialRampToValueAtTime(0.001, time + 0.1)
+    osc.connect(og)
+    og.connect(dest)
+    osc.start(time)
+    osc.stop(time + 0.12)
+  } else {
+    // hihat
+    const buffer = c.createBuffer(1, Math.floor(c.sampleRate * 0.06), c.sampleRate)
+    const data = buffer.getChannelData(0)
+    for (let i = 0; i < data.length; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / 300)
+    }
+    const src = c.createBufferSource()
+    src.buffer = buffer
+    const filter = c.createBiquadFilter()
+    filter.type = 'highpass'
+    filter.frequency.value = 6000
+    const g = c.createGain()
+    g.gain.setValueAtTime(0, time)
+    g.gain.linearRampToValueAtTime(0.08, time + 0.001)
+    g.gain.exponentialRampToValueAtTime(0.001, time + 0.05)
+    src.connect(filter)
+    filter.connect(g)
+    g.connect(dest)
+    src.start(time)
+  }
+}
+
 function scheduleBeat(beatIndex: number, time: number) {
   const c = getCtx()
   if (!c) return
 
-  const chordIdx = Math.floor(beatIndex / 8) % CHORDS.length
+  // 8 chord progression, 4 beats per chord = 32 beats total loop
+  const chordIdx = Math.floor(beatIndex / 4) % CHORDS.length
   const chord = CHORDS[chordIdx]
-  const beatInChord = beatIndex % 8
+  const beatInChord = beatIndex % 4
+  const totalBar = Math.floor(beatIndex / 4)
 
-  // Bass — kökü her 4 vuruşta
-  if (beatInChord === 0 || beatInChord === 4) {
+  // Bass — root on beat 1, fifth on beat 3 (walking bass)
+  if (beatInChord === 0) {
     musicEnvelope(
       c,
       midiToFreq(chord.root - 12),
       time,
-      BEAT * 3.5,
+      BEAT * 1.8,
+      'sine',
+      0.16
+    )
+  } else if (beatInChord === 2) {
+    musicEnvelope(
+      c,
+      midiToFreq(chord.fifth - 12),
+      time,
+      BEAT * 1.8,
       'sine',
       0.14
     )
   }
 
-  // Pad — akor notaları, 8 vuruş boyunca sustain (her akor)
+  // Pad — full chord on beat 1 of each bar
   if (beatInChord === 0) {
-    musicEnvelope(c, midiToFreq(chord.root), time, BEAT * 8, 'sine', 0.035)
-    musicEnvelope(c, midiToFreq(chord.third), time, BEAT * 8, 'sine', 0.03)
-    musicEnvelope(c, midiToFreq(chord.fifth), time, BEAT * 8, 'sine', 0.03)
+    musicEnvelope(c, midiToFreq(chord.root), time, BEAT * 4, 'sine', 0.035)
+    musicEnvelope(c, midiToFreq(chord.third), time, BEAT * 4, 'sine', 0.03)
+    musicEnvelope(c, midiToFreq(chord.fifth), time, BEAT * 4, 'sine', 0.03)
   }
 
-  // Melody — beats 1, 3, 5, 7 (offbeat)
-  if (beatInChord % 2 === 1) {
-    const notes = [
-      chord.root + 12,
-      chord.third + 12,
-      chord.fifth + 12,
-      chord.seventh + 12,
-    ]
-    const note = notes[Math.floor(pseudoRand(beatIndex * 31) * notes.length)]
-    musicEnvelope(c, midiToFreq(note), time, BEAT * 1.4, 'triangle', 0.05)
+  // Drums
+  // Kick on 1 & 3
+  if (beatInChord === 0 || beatInChord === 2) playDrum(c, 'kick', time)
+  // Snare on 2 & 4 (backbeat)
+  if (beatInChord === 1 || beatInChord === 3) playDrum(c, 'snare', time)
+  // Hi-hat on all 8th notes
+  playDrum(c, 'hihat', time)
+  playDrum(c, 'hihat', time + BEAT * 0.5)
+
+  // Melody — pentatonic with pattern variation
+  // Notes: chord + pentatonic scale tones above
+  const pentatonic = [
+    chord.root + 12,
+    chord.third + 12,
+    chord.fifth + 12,
+    chord.seventh + 12,
+    chord.root + 19, // octave + fifth
+  ]
+  const rhythmSeed = pseudoRand(beatIndex * 31 + totalBar * 7)
+  // Every other beat, play a melody note
+  if (beatInChord === 1 || beatInChord === 3 || rhythmSeed > 0.7) {
+    const noteIdx = Math.floor(pseudoRand(beatIndex * 13 + 5) * pentatonic.length)
+    const note = pentatonic[noteIdx]
+    musicEnvelope(c, midiToFreq(note), time, BEAT * 0.9, 'triangle', 0.06)
   }
 
-  // Occasional sparkle (every 16 beats)
-  if (beatIndex % 16 === 8) {
+  // Sparkle decoration every 8 bars
+  if (beatIndex % 32 === 20) {
     musicEnvelope(
       c,
       midiToFreq(chord.root + 24),
       time,
-      BEAT * 2,
+      BEAT * 1.5,
       'sine',
-      0.03
+      0.035
     )
+  }
+
+  // Transition flair: on last bar of progression, extra snare flurry
+  if (beatIndex % 32 === 30) {
+    playDrum(c, 'snare', time + BEAT * 0.25)
+    playDrum(c, 'snare', time + BEAT * 0.5)
+    playDrum(c, 'snare', time + BEAT * 0.75)
   }
 }
 
@@ -367,4 +662,58 @@ export function toggleMusic() {
 
 export function isMusicEnabled() {
   return musicEnabledFlag
+}
+
+// ─── Ambient: rüzgar loop ───
+let ambientGain: GainNode | null = null
+let ambientStarted = false
+
+export function startAmbient() {
+  const c = getCtx()
+  if (!c || ambientStarted) return
+  ambientStarted = true
+  // Looping noise buffer (2sn, seamless fade-in/out)
+  const bufSec = 2
+  const buffer = c.createBuffer(1, Math.floor(c.sampleRate * bufSec), c.sampleRate)
+  const data = buffer.getChannelData(0)
+  for (let i = 0; i < data.length; i++) {
+    // Brown noise — düşük frekans ağırlıklı
+    data[i] =
+      (Math.random() * 2 - 1) *
+      (1 - Math.abs((i - data.length / 2) / (data.length / 2)) * 0.3)
+  }
+  const src = c.createBufferSource()
+  src.buffer = buffer
+  src.loop = true
+
+  const filter = c.createBiquadFilter()
+  filter.type = 'lowpass'
+  filter.frequency.value = 380
+
+  const filter2 = c.createBiquadFilter()
+  filter2.type = 'highpass'
+  filter2.frequency.value = 80
+
+  ambientGain = c.createGain()
+  ambientGain.gain.value = 0.08
+
+  // Hafif volume modülasyonu (rüzgar dalgaları)
+  const lfo = c.createOscillator()
+  lfo.frequency.value = 0.12
+  const lfoGain = c.createGain()
+  lfoGain.gain.value = 0.04
+  lfo.connect(lfoGain)
+  lfoGain.connect(ambientGain.gain)
+  lfo.start()
+
+  src.connect(filter)
+  filter.connect(filter2)
+  filter2.connect(ambientGain)
+  ambientGain.connect(masterGain ?? c.destination)
+  src.start()
+}
+
+export function setAmbientEnabled(on: boolean) {
+  if (!ambientGain) return
+  ambientGain.gain.value = on ? 0.08 : 0
 }

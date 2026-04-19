@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useGameStore } from '@/lib/store'
+import { getWeapon } from '@/lib/weapons'
 
 const BASE = 150
 const STICK = 68
@@ -12,6 +13,9 @@ export default function MobileJoystick() {
   const setMobileMove = useGameStore((s) => s.setMobileMove)
   const setMobileJump = useGameStore((s) => s.setMobileJump)
   const setMobileAttack = useGameStore((s) => s.setMobileAttack)
+  const setMobileWeaponFire = useGameStore((s) => s.setMobileWeaponFire)
+  const cycleWeapon = useGameStore((s) => s.cycleWeapon)
+  const currentWeapon = useGameStore((s) => s.currentWeapon)
 
   const [stickOffset, setStickOffset] = useState({ x: 0, y: 0 })
   const activeTouchId = useRef<number | null>(null)
@@ -87,14 +91,17 @@ export default function MobileJoystick() {
       setMobileMove({ x: 0, y: 0 })
       setMobileJump(false)
       setMobileAttack(false)
+      setMobileWeaponFire(false)
     }
-  }, [isMobile, setMobileMove, setMobileJump, setMobileAttack])
+  }, [isMobile, setMobileMove, setMobileJump, setMobileAttack, setMobileWeaponFire])
 
   if (!isMobile) return null
 
+  const weapon = getWeapon(currentWeapon)
+
   return (
     <>
-      {/* Joystick base */}
+      {/* Joystick */}
       <div
         ref={zoneRef}
         className="pointer-events-auto absolute bottom-10 left-10 touch-none rounded-full border-4 border-white/70 bg-white/30 shadow-2xl backdrop-blur-sm"
@@ -113,9 +120,40 @@ export default function MobileJoystick() {
         />
       </div>
 
-      {/* Attack button (left of jump) */}
+      {/* Cycle weapon button — top of right cluster */}
       <button
-        className="absolute bottom-28 right-36 h-20 w-20 touch-none rounded-full border-4 border-white/80 bg-gradient-to-br from-red-500 to-rose-600 text-2xl font-black text-white shadow-2xl active:scale-95"
+        className="absolute bottom-48 right-10 h-14 w-14 touch-none rounded-full border-4 border-white/80 bg-gradient-to-br from-slate-500 to-slate-700 text-2xl font-black text-white shadow-2xl active:scale-95"
+        onTouchStart={(e) => {
+          e.preventDefault()
+          cycleWeapon()
+        }}
+        title="Silah değiştir"
+      >
+        🔄
+      </button>
+
+      {/* Weapon fire button */}
+      {currentWeapon !== 'fist' && (
+        <button
+          className="absolute bottom-28 right-36 h-16 w-16 touch-none rounded-full border-4 border-white/80 bg-gradient-to-br from-indigo-500 to-purple-700 text-2xl font-black text-white shadow-2xl active:scale-95"
+          onTouchStart={(e) => {
+            e.preventDefault()
+            setMobileWeaponFire(true)
+          }}
+          onTouchEnd={(e) => {
+            e.preventDefault()
+            setMobileWeaponFire(false)
+          }}
+          onTouchCancel={() => setMobileWeaponFire(false)}
+          title={weapon.name}
+        >
+          {weapon.emoji}
+        </button>
+      )}
+
+      {/* Fist/attack button */}
+      <button
+        className={`absolute ${currentWeapon !== 'fist' ? 'bottom-28 right-56' : 'bottom-28 right-36'} h-16 w-16 touch-none rounded-full border-4 border-white/80 bg-gradient-to-br from-red-500 to-rose-600 text-2xl font-black text-white shadow-2xl active:scale-95`}
         onTouchStart={(e) => {
           e.preventDefault()
           setMobileAttack(true)
@@ -125,6 +163,7 @@ export default function MobileJoystick() {
           setMobileAttack(false)
         }}
         onTouchCancel={() => setMobileAttack(false)}
+        title="Yumruk"
       >
         👊
       </button>
@@ -141,6 +180,7 @@ export default function MobileJoystick() {
           setMobileJump(false)
         }}
         onTouchCancel={() => setMobileJump(false)}
+        title="Zıpla"
       >
         ↑
       </button>

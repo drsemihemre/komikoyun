@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import { loadStats, saveStats } from './highScore'
+import type { WeaponId } from './weapons'
+import { WEAPONS } from './weapons'
 
 type Vec2 = { x: number; y: number }
 
@@ -11,7 +13,10 @@ type GameState = {
   mobileMove: Vec2
   mobileJump: boolean
   mobileAttack: boolean
+  mobileWeaponFire: boolean
   isMobile: boolean
+  // Weapons
+  currentWeapon: WeaponId
   // Potion-driven effects
   scale: number
   speedMult: number
@@ -37,7 +42,10 @@ type GameState = {
   setMobileMove: (v: Vec2) => void
   setMobileJump: (j: boolean) => void
   setMobileAttack: (a: boolean) => void
+  setMobileWeaponFire: (a: boolean) => void
   setIsMobile: (m: boolean) => void
+  cycleWeapon: () => void
+  setWeapon: (w: WeaponId) => void
   drinkPotion: (p: PotionType) => void
   resetPotions: () => void
   incrementHitCount: () => void
@@ -84,7 +92,9 @@ export const useGameStore = create<GameState>((set) => ({
   mobileMove: { x: 0, y: 0 },
   mobileJump: false,
   mobileAttack: false,
+  mobileWeaponFire: false,
   isMobile: false,
+  currentWeapon: 'fist',
   scale: 1,
   speedMult: 1,
   potionHits: { grow: 0, shrink: 0, speed: 0, slow: 0 },
@@ -104,7 +114,15 @@ export const useGameStore = create<GameState>((set) => ({
   setMobileMove: (mobileMove) => set({ mobileMove }),
   setMobileJump: (mobileJump) => set({ mobileJump }),
   setMobileAttack: (mobileAttack) => set({ mobileAttack }),
+  setMobileWeaponFire: (mobileWeaponFire) => set({ mobileWeaponFire }),
   setIsMobile: (isMobile) => set({ isMobile }),
+  cycleWeapon: () =>
+    set((s) => {
+      const idx = WEAPONS.findIndex((w) => w.id === s.currentWeapon)
+      const next = WEAPONS[(idx + 1) % WEAPONS.length]
+      return { currentWeapon: next.id }
+    }),
+  setWeapon: (w) => set({ currentWeapon: w }),
 
   drinkPotion: (p) =>
     set((state) => {

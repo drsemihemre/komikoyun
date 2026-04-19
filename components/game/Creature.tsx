@@ -14,7 +14,7 @@ import {
   type CreatureHandle,
 } from '@/lib/creatureRegistry'
 import { getPlayerHandle } from '@/lib/playerHandle'
-import { useGameStore } from '@/lib/store'
+import { useGameStore, MAP_HALF } from '@/lib/store'
 import { playKo } from '@/lib/sounds'
 
 export type CreatureShape = 'round' | 'horned' | 'jumper' | 'tank'
@@ -25,7 +25,7 @@ export type CreatureVariant = {
   accentColor?: string
   hp: number
   speed: number
-  size: number // 0.8 - 1.6
+  size: number
 }
 
 type Props = {
@@ -45,6 +45,7 @@ const ATTACK_COOLDOWN = 1.6
 const SIGHT_RANGE = 9
 
 type AtkState = 'idle' | 'wind' | 'strike' | 'recover'
+type SpecialState = 'none' | 'melting' | 'balloon' | 'sucking'
 
 export default function Creature({
   id,
@@ -67,6 +68,11 @@ export default function Creature({
   const hp = useRef(variant.hp)
   const walkPhase = useRef(Math.random() * Math.PI * 2)
 
+  // Özel durumlar (silah etkileri)
+  const specialState = useRef<SpecialState>('none')
+  const specialStartT = useRef(0)
+  const specialData = useRef<{ px: number; pz: number } | null>(null)
+
   const atkState = useRef<AtkState>('idle')
   const atkT = useRef(0)
   const lastAtkEndT = useRef(-10)
@@ -87,12 +93,11 @@ export default function Creature({
         if (!body.current) return
         hp.current -= 1
         const willKo = hp.current <= 0
-        // Always brief ragdoll from hit
         isRagdoll.current = true
         ragdollStartT.current = performance.now() / 1000
         atkState.current = 'idle'
         body.current.setEnabledRotations(true, true, true, true)
-        const forceMult = willKo ? 1 : 0.4 // lighter knock on non-KO
+        const forceMult = willKo ? 1 : 0.4
         body.current.applyImpulse(
           {
             x: force[0] * forceMult,
@@ -114,6 +119,39 @@ export default function Creature({
           playKo()
         }
       },
+      melt: () => {
+        if (!body.current) return
+        specialState.current = 'melting'
+        specialStartT.current = performance.now() / 1000
+        body.current.setLinvel({ x: 0, y: 0, z: 0 }, true)
+        useGameStore.getState().incrementHitCount()
+        // visualGroup scale animates down in useFrame
+      },
+      teleportAway: () => {
+        if (!body.current) return
+        // Random location in map
+        const x = (Math.random() - 0.5) * (MAP_HALF - 20) * 2
+        const z = (Math.random() - 0.5) * (MAP_HALF - 20) * 2
+        body.current.setTranslation({ x, y: 4, z }, true)
+        body.current.setLinvel({ x: 0, y: 0, z: 0 }, true)
+        body.current.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true)
+        useGameStore.getState().incrementHitCount()
+      },
+      suckAndLaunch: (playerX, playerZ) => {
+        if (!body.current) return
+        specialState.current = 'sucking'
+        specialStartT.current = performance.now() / 1000
+        specialData.current = { px: playerX, pz: playerZ }
+        useGameStore.getState().incrementHitCount()
+      },
+      balloonify: () => {
+        if (!body.current) return
+        specialState.current = 'balloon'
+        specialStartT.current = performance.now() / 1000
+        body.current.setEnabledRotations(true, true, true, true)
+        // Gradual upward lift handled in useFrame
+        useGameStore.getState().incrementHitCount()
+      },
     }
     registerCreature(handle)
     return () => unregisterCreature(handle)
@@ -124,16 +162,127 @@ export default function Creature({
     if (!body.current) return
     const now = state.clock.elapsedTime
 
-    // Ragdoll recovery
+    // --- Special state animations ---
+    if (specialState.current === 'melting') {
+      const elapsed = performance.now() / 1000 - specialStartT.current
+      const shrink = 1 - Math.min(1, elapsed / 1.2)
+      if (visualGroup.current) {
+        visualGroup.current.scale.setScalar(shrink * size)
+      }
+      if (elapsed > 1.3) {
+        // Respawn at spawn
+        body.current.setTranslation(
+          { x: spawn[0], y: spawn[1], z: spawn[2] },
+          true
+        )
+        body.current.setLinvel({ x: 0, y: 0, z: 0 }, true)
+        body.current.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true)
+        if (visualGroup.current) visualGroup.current.scale.setScalar(size)
+        specialState.current = 'none'
+        hp.current = variant.hp
+      }
+      return
+    }
+
+    if (specialState.current === 'balloon') {
+      const elapsed = performance.now() / 1000 - specialStartT.current
+      // Float up with gentle rotation
+      const lift = Math.min(1, elapsed / 0.5) * 8 - elapsed * 2
+      const linvel = body.current.linvel()
+      body.current.setLinvel(
+        {
+          x: Math.sin(now * 2) * 2,
+          y: Math.max(linvel.y + 0.3, lift),
+          z: Math.cos(now * 1.5) * 2,
+        },
+        true
+      )
+      body.current.applyTorqueImpulse(
+        { x: 0, y: 0.3, z: 0 },
+        true
+      )
+      // Visual: stretch vertically
+      if (visualGroup.current) {
+        const puff = 1 + Math.min(0.8, elapsed * 0.3)
+        visualGroup.current.scale.set(size * puff, size * (1 + elapsed * 0.4), size * puff)
+      }
+      if (elapsed > 3.5) {
+        // Pop — respawn
+        body.current.setTranslation(
+          { x: spawn[0], y: spawn[1], z: spawn[2] },
+          true
+        )
+        body.current.setLinvel({ x: 0, y: 0, z: 0 }, true)
+        body.current.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true)
+        body.current.setEnabledRotations(false, true, false, true)
+        if (visualGroup.current) visualGroup.current.scale.setScalar(size)
+        specialState.current = 'none'
+        hp.current = variant.hp
+        playKo()
+      }
+      return
+    }
+
+    if (specialState.current === 'sucking') {
+      const elapsed = performance.now() / 1000 - specialStartT.current
+      const target = specialData.current!
+      const pos = body.current.translation()
+      if (elapsed < 0.6) {
+        // Suck toward player (accelerate inward)
+        const dx = target.px - pos.x
+        const dz = target.pz - pos.z
+        const dist = Math.hypot(dx, dz)
+        const pull = 14
+        const nx = dx / Math.max(dist, 0.1)
+        const nz = dz / Math.max(dist, 0.1)
+        body.current.setLinvel(
+          {
+            x: nx * pull,
+            y: 1.5,
+            z: nz * pull,
+          },
+          true
+        )
+      } else if (elapsed < 0.75) {
+        // Brief pause at player
+        body.current.setLinvel({ x: 0, y: 0, z: 0 }, true)
+      } else if (elapsed < 0.85) {
+        // Launch in random direction
+        const ang = Math.random() * Math.PI * 2
+        body.current.applyImpulse(
+          {
+            x: Math.cos(ang) * 18,
+            y: 14,
+            z: Math.sin(ang) * 18,
+          },
+          true
+        )
+        body.current.applyTorqueImpulse(
+          {
+            x: (Math.random() - 0.5) * 6,
+            y: (Math.random() - 0.5) * 6,
+            z: (Math.random() - 0.5) * 6,
+          },
+          true
+        )
+        body.current.setEnabledRotations(true, true, true, true)
+      } else if (elapsed > 2.5) {
+        // Recover
+        body.current.setEnabledRotations(false, true, false, true)
+        body.current.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true)
+        specialState.current = 'none'
+      }
+      return
+    }
+
+    // --- Ragdoll recovery ---
     if (isRagdoll.current) {
       const linvel = body.current.linvel()
       const sp = Math.hypot(linvel.x, linvel.y, linvel.z)
       const recoverTime = hp.current <= 0 ? 4 : 1.8
       if (sp < 0.8 && now - ragdollStartT.current > recoverTime) {
-        // KO'd creatures respawn with full HP
         if (hp.current <= 0) {
           hp.current = variant.hp
-          // Respawn at random location within arena
           const ang = Math.random() * Math.PI * 2
           const r = Math.random() * (arenaRadius - 3)
           body.current.setTranslation(
@@ -179,7 +328,6 @@ export default function Creature({
       distToPlayer = Math.hypot(dx, dz)
     }
 
-    // Jumper random jumps
     if (variant.shape === 'jumper' && now > nextJumpAt.current) {
       const linvel = body.current.linvel()
       if (Math.abs(linvel.y) < 0.5) {
@@ -191,7 +339,6 @@ export default function Creature({
       }
     }
 
-    // Attack state machine
     const canStartAttack =
       atkState.current === 'idle' &&
       distToPlayer < attackRange &&
@@ -235,7 +382,6 @@ export default function Creature({
       }
     }
 
-    // Movement
     const shouldChase =
       !playerDown && distToPlayer < SIGHT_RANGE && atkState.current === 'idle'
 
@@ -291,11 +437,11 @@ export default function Creature({
       true
     )
 
-    // Visuals
     walkPhase.current += delta * 6
     const bob = Math.abs(Math.sin(walkPhase.current)) * 0.08
-    if (visualGroup.current) {
+    if (visualGroup.current && specialState.current === 'none') {
       visualGroup.current.position.y = atkState.current === 'idle' ? bob : 0
+      visualGroup.current.scale.setScalar(size)
     }
 
     if (leftArm.current && rightArm.current && bodyTilt.current) {
@@ -370,13 +516,11 @@ function CreatureMesh({
 
   return (
     <group ref={bodyTilt}>
-      {/* Body */}
       <mesh castShadow>
         <capsuleGeometry args={[bodyRadius, bodyHeight, 8, 12]} />
         <meshToonMaterial color={color} />
       </mesh>
 
-      {/* Arms — pivot at shoulder */}
       <group ref={leftArm} position={[bodyRadius + 0.08, 0.2, 0]}>
         <mesh position={[0, -0.2, 0]} castShadow>
           <capsuleGeometry
@@ -394,7 +538,6 @@ function CreatureMesh({
         </mesh>
       </group>
 
-      {/* Head */}
       <mesh
         position={[0, shape === 'tank' ? 0.75 : shape === 'jumper' ? 0.5 : 0.7, 0]}
         castShadow
@@ -405,7 +548,6 @@ function CreatureMesh({
         <meshToonMaterial color={color} />
       </mesh>
 
-      {/* Goofy eyes */}
       <mesh position={[0.16, shape === 'tank' ? 0.85 : 0.82, 0.32]}>
         <sphereGeometry args={[0.14, 12, 12]} />
         <meshBasicMaterial color="white" />
@@ -423,13 +565,11 @@ function CreatureMesh({
         <meshBasicMaterial color="black" />
       </mesh>
 
-      {/* Mouth */}
       <mesh position={[0, shape === 'tank' ? 0.6 : 0.58, 0.4]}>
         <sphereGeometry args={[shape === 'tank' ? 0.11 : 0.08, 8, 8]} />
         <meshBasicMaterial color="#1a1a1a" />
       </mesh>
 
-      {/* Shape-specific decorations */}
       {shape === 'horned' && (
         <>
           <mesh
@@ -448,7 +588,6 @@ function CreatureMesh({
             <coneGeometry args={[0.12, 0.45, 8]} />
             <meshToonMaterial color={accentColor} />
           </mesh>
-          {/* Spikes on back */}
           <mesh position={[0, 0.3, -0.3]} rotation={[0.3, 0, 0]} castShadow>
             <coneGeometry args={[0.1, 0.3, 6]} />
             <meshToonMaterial color={accentColor} />
@@ -458,7 +597,6 @@ function CreatureMesh({
 
       {shape === 'jumper' && (
         <>
-          {/* Springy feet */}
           <mesh position={[0.15, -0.35, 0]} castShadow>
             <cylinderGeometry args={[0.12, 0.18, 0.15, 10]} />
             <meshToonMaterial color={accentColor} />
@@ -467,7 +605,6 @@ function CreatureMesh({
             <cylinderGeometry args={[0.12, 0.18, 0.15, 10]} />
             <meshToonMaterial color={accentColor} />
           </mesh>
-          {/* Antenna */}
           <mesh position={[0, 0.95, 0]} castShadow>
             <cylinderGeometry args={[0.02, 0.02, 0.25, 6]} />
             <meshToonMaterial color={accentColor} />
@@ -481,7 +618,6 @@ function CreatureMesh({
 
       {shape === 'tank' && (
         <>
-          {/* Shoulder pads */}
           <mesh position={[0.5, 0.3, 0]} castShadow>
             <boxGeometry args={[0.25, 0.15, 0.4]} />
             <meshToonMaterial color={accentColor} />
@@ -490,7 +626,6 @@ function CreatureMesh({
             <boxGeometry args={[0.25, 0.15, 0.4]} />
             <meshToonMaterial color={accentColor} />
           </mesh>
-          {/* Belt */}
           <mesh position={[0, -0.05, 0]} castShadow>
             <torusGeometry args={[0.5, 0.06, 6, 16]} />
             <meshToonMaterial color={accentColor} />
