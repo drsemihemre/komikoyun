@@ -4,6 +4,12 @@ import { useEffect, useState } from 'react'
 import { useGameStore, PLAYER_HP_MAX } from '@/lib/store'
 import { setMuted, isMuted, toggleMusic, isMusicEnabled } from '@/lib/sounds'
 import { WEAPONS, getWeapon } from '@/lib/weapons'
+import {
+  isConnected as isMPConnected,
+  subscribeMP,
+  getRemotes,
+} from '@/lib/multiplayer'
+import { loadNickname } from '@/lib/nickname'
 
 export default function HUD() {
   const isMobile = useGameStore((s) => s.isMobile)
@@ -27,6 +33,19 @@ export default function HUD() {
   const [showCongrats, setShowCongrats] = useState(false)
   const [lastHighCheck, setLastHighCheck] = useState(0)
   const [jumpBoostLeft, setJumpBoostLeft] = useState(0)
+  const [mpConnected, setMpConnected] = useState(false)
+  const [mpPeers, setMpPeers] = useState(0)
+  const [nickname, setNickname] = useState('')
+
+  useEffect(() => {
+    setNickname(loadNickname())
+    const update = () => {
+      setMpConnected(isMPConnected())
+      setMpPeers(getRemotes().length)
+    }
+    update()
+    return subscribeMP(update)
+  }, [])
 
   // Jump boost timer tick
   useEffect(() => {
@@ -100,7 +119,18 @@ export default function HUD() {
       {!isMobile && (
         <div className="absolute left-4 top-4 rounded-xl bg-black/40 px-4 py-2 text-white shadow-lg backdrop-blur-sm">
           <div className="text-lg font-black tracking-wide">KOMİK OYUN</div>
-          <div className="mt-1 text-xs opacity-80">Faz 9 · Arena & Müzik</div>
+          <div className="mt-1 flex items-center gap-2 text-xs opacity-80">
+            <span
+              className={`inline-block h-2 w-2 rounded-full ${
+                mpConnected ? 'bg-green-400' : 'bg-red-400'
+              }`}
+              title={mpConnected ? 'Online' : 'Offline'}
+            />
+            <span>{nickname || 'Oyuncu'}</span>
+            {mpConnected && (
+              <span className="opacity-60">· {mpPeers} oyuncu</span>
+            )}
+          </div>
         </div>
       )}
 
