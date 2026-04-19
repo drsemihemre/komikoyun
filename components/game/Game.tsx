@@ -21,7 +21,8 @@ const controlKeys = [
   { name: 'right', keys: ['ArrowRight', 'd', 'D'] },
   { name: 'jump', keys: ['Space'] },
   { name: 'attack', keys: ['f', 'F'] },
-  { name: 'camera', keys: ['v', 'V'] },
+  // 'camera' V tuşu Player.tsx içindeki doğrudan keydown listener'ıyla işleniyor
+  // (pointer lock user-activation gerektirdiği için)
 ]
 
 function ShadowFollower({

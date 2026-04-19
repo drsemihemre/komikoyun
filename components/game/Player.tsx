@@ -20,16 +20,14 @@ const INPUT_SMOOTH = 16
 const ROT_SMOOTH = 10
 const WALK_HZ = 7
 
-// Ragdoll
 const FALL_AIRTIME = 0.9
 const FALL_VEL_Y = -18
 const RAGDOLL_MIN_DURATION = 1.5
 const RAGDOLL_SETTLE_TIME = 0.7
 
-// Creature damage
-const CREATURE_TOUCH_RANGE = 1.6 // * scale
-const CREATURE_DAMAGE = 8
-const CREATURE_DAMAGE_COOLDOWN = 1.2 // per creature
+const MOUSE_SENS = 0.0028
+const PITCH_MIN = -1.2
+const PITCH_MAX = 1.2
 
 export default function Player() {
   const body = useRef<RapierRigidBody>(null)
@@ -62,16 +60,16 @@ export default function Player() {
   const attackProgress = useRef(-1)
   const lastAttackT = useRef(0)
   const wasAttackPressed = useRef(false)
-  const wasCameraPressed = useRef(false)
 
-  // Per-creature damage cooldowns
-  const creatureHitCooldowns = useRef(new Map<string, number>())
+  // FPV mouse look
+  const mouseYaw = useRef(0)
+  const mousePitch = useRef(0)
 
   const [, getKeys] = useKeyboardControls()
   const scale = useGameStore((s) => s.scale)
   const cameraMode = useGameStore((s) => s.cameraMode)
 
-  // Register player for global access (creatures, etc.)
+  // Register player handle for creatures to attack us
   useEffect(() => {
     registerPlayer({
       getPos: () => {
@@ -79,9 +77,97 @@ export default function Player() {
         const p = body.current.translation()
         return { x: p.x, y: p.y, z: p.z }
       },
+      takeHit: (damage, knockbackDir) => {
+        const { playerHP, damagePlayer, isMobile } = useGameStore.getState()
+        void isMobile
+        if (playerHP <= 0) return
+        damagePlayer(damage)
+        if (body.current) {
+          const k = 5 * scale
+          body.current.applyImpulse(
+            {
+              x: knockbackDir[0] * k,
+              y: 3.5 * scale + knockbackDir[1] * k,
+              z: knockbackDir[2] * k,
+            },
+            true
+          )
+        }
+      },
+      isDown: () => {
+        const hp = useGameStore.getState().playerHP
+        return hp <= 0 || isRagdoll.current
+      },
     })
     return () => unregisterPlayer()
+  }, [scale])
+
+  // Keyboard V → toggle camera + pointer lock
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'v' && e.key !== 'V') return
+      if (e.repeat) return
+      const nextMode =
+        useGameStore.getState().cameraMode === 'third' ? 'first' : 'third'
+      if (nextMode === 'first') {
+        // Sync mouse yaw to current yaw so camera doesn't snap
+        mouseYaw.current = currentYaw.current
+        mousePitch.current = 0
+        document.body.requestPointerLock?.()
+      } else {
+        if (document.pointerLockElement) document.exitPointerLock?.()
+      }
+      useGameStore.getState().toggleCamera()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
   }, [])
+
+  // Pointer lock change → if user exits lock (ESC), switch back to 3rd person
+  useEffect(() => {
+    const onLockChange = () => {
+      if (
+        !document.pointerLockElement &&
+        useGameStore.getState().cameraMode === 'first'
+      ) {
+        useGameStore.getState().toggleCamera()
+      }
+    }
+    document.addEventListener('pointerlockchange', onLockChange)
+    return () =>
+      document.removeEventListener('pointerlockchange', onLockChange)
+  }, [])
+
+  // Mouse look in FPV
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!document.pointerLockElement) return
+      if (useGameStore.getState().cameraMode !== 'first') return
+      mouseYaw.current -= e.movementX * MOUSE_SENS
+      mousePitch.current = MathUtils.clamp(
+        mousePitch.current - e.movementY * MOUSE_SENS,
+        PITCH_MIN,
+        PITCH_MAX
+      )
+    }
+    document.addEventListener('mousemove', onMouseMove)
+    return () => document.removeEventListener('mousemove', onMouseMove)
+  }, [])
+
+  // When cameraMode changes via button (not keyboard), also handle pointer lock
+  useEffect(() => {
+    if (cameraMode === 'first') {
+      mouseYaw.current = currentYaw.current
+      mousePitch.current = 0
+      if (!document.pointerLockElement) {
+        document.body.requestPointerLock?.()
+      }
+    } else {
+      if (document.pointerLockElement) {
+        document.exitPointerLock?.()
+      }
+    }
+  }, [cameraMode])
 
   useFrame((state, delta) => {
     if (!body.current) return
@@ -92,9 +178,7 @@ export default function Player() {
       mobileAttack,
       speedMult,
       playerHP,
-      damagePlayer,
       setPlayerHP,
-      toggleCamera,
     } = useGameStore.getState()
     const keys = getKeys()
     const now = state.clock.elapsedTime
@@ -102,12 +186,6 @@ export default function Player() {
     const pos = body.current.translation()
     const linvel = body.current.linvel()
 
-    // Camera toggle (rising edge)
-    const camPressed = !!keys.camera
-    if (camPressed && !wasCameraPressed.current) toggleCamera()
-    wasCameraPressed.current = camPressed
-
-    // Grounded + airTime
     const grounded = Math.abs(linvel.y) < 0.5
     if (grounded) airTime.current = 0
     else airTime.current += delta
@@ -121,16 +199,12 @@ export default function Player() {
       enterRagdoll()
     }
 
-    // Death → ragdoll + respawn
+    // HP=0 → ragdoll + respawn
     if (playerHP <= 0 && !isRagdoll.current) {
       enterRagdoll()
-      // Queue full respawn after duration
       setTimeout(() => {
         if (!body.current) return
-        body.current.setTranslation(
-          { x: 0, y: 3, z: 0 },
-          true
-        )
+        body.current.setTranslation({ x: 0, y: 3, z: 0 }, true)
         body.current.setLinvel({ x: 0, y: 0, z: 0 }, true)
         body.current.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true)
         body.current.setEnabledRotations(false, false, false, true)
@@ -157,7 +231,7 @@ export default function Player() {
       )
     }
 
-    // --- RAGDOLL RECOVERY ---
+    // RAGDOLL RECOVERY
     if (isRagdoll.current) {
       const totalSpeed = Math.hypot(linvel.x, linvel.y, linvel.z)
       if (totalSpeed < 0.6 && grounded) {
@@ -189,7 +263,7 @@ export default function Player() {
       }
     }
 
-    // --- INPUT (skipped during ragdoll) ---
+    // --- INPUT ---
     const raw = rawInput.current.set(0, 0, 0)
     if (!isRagdoll.current) {
       if (keys.forward) raw.z -= 1
@@ -205,12 +279,38 @@ export default function Player() {
     const si = smoothInput.current
     const moveMag = si.length()
 
+    // --- MOVEMENT + YAW ---
     if (!isRagdoll.current) {
       const speed = BASE_SPEED * speedMult * Math.pow(scale, 0.45)
-      body.current.setLinvel(
-        { x: si.x * speed, y: linvel.y, z: si.z * speed },
-        true
-      )
+
+      if (cameraMode === 'first') {
+        // FPV: yaw driven by mouse; movement is forward/strafe relative to yaw
+        currentYaw.current = mouseYaw.current
+        targetYaw.current = mouseYaw.current
+        const sinY = Math.sin(currentYaw.current)
+        const cosY = Math.cos(currentYaw.current)
+        // si.z negative = forward (W), si.x positive = right (D) — strafe
+        const worldVx = -si.z * sinY + si.x * cosY
+        const worldVz = -si.z * cosY - si.x * sinY
+        body.current.setLinvel(
+          { x: worldVx * speed, y: linvel.y, z: worldVz * speed },
+          true
+        )
+      } else {
+        // 3rd person: input-based yaw, move in input direction
+        body.current.setLinvel(
+          { x: si.x * speed, y: linvel.y, z: si.z * speed },
+          true
+        )
+        if (raw.lengthSq() > 0.01) {
+          targetYaw.current = Math.atan2(raw.x, raw.z)
+        }
+        currentYaw.current = lerpAngle(
+          currentYaw.current,
+          targetYaw.current,
+          1 - Math.exp(-ROT_SMOOTH * delta)
+        )
+      }
 
       if ((keys.jump || mobileJump) && grounded) {
         const mass = body.current.mass()
@@ -219,15 +319,6 @@ export default function Player() {
           true
         )
       }
-
-      if (raw.lengthSq() > 0.01) {
-        targetYaw.current = Math.atan2(raw.x, raw.z)
-      }
-      currentYaw.current = lerpAngle(
-        currentYaw.current,
-        targetYaw.current,
-        1 - Math.exp(-ROT_SMOOTH * delta)
-      )
 
       // ATTACK
       const attackHeld = keys.attack || mobileAttack
@@ -265,37 +356,9 @@ export default function Player() {
           if (hits > 0) useGameStore.getState().incrementHitCount()
         }
       }
-
-      // CREATURE PROXIMITY DAMAGE
-      const dxS = pos.x - SAFE_ZONE.center[0]
-      const dzS = pos.z - SAFE_ZONE.center[2]
-      const inSafe = Math.hypot(dxS, dzS) < SAFE_ZONE.radius
-      if (!inSafe) {
-        const range = CREATURE_TOUCH_RANGE * scale
-        for (const c of getCreatures()) {
-          const cp = c.getPos()
-          if (!cp) continue
-          const dx = cp.x - pos.x
-          const dz = cp.z - pos.z
-          const dist = Math.hypot(dx, dz)
-          if (dist > range) continue
-          const last = creatureHitCooldowns.current.get(c.id) ?? -10
-          if (now - last < CREATURE_DAMAGE_COOLDOWN) continue
-          creatureHitCooldowns.current.set(c.id, now)
-          damagePlayer(CREATURE_DAMAGE)
-          // Small knockback
-          const nx = -dx / Math.max(dist, 0.01)
-          const nz = -dz / Math.max(dist, 0.01)
-          const k = 6 * scale
-          body.current.applyImpulse(
-            { x: nx * k, y: 4 * scale, z: nz * k },
-            true
-          )
-        }
-      }
     }
 
-    // Attack animation tick
+    // Tick attack animation
     if (attackProgress.current >= 0) {
       attackProgress.current += delta / 0.28
       if (attackProgress.current >= 1) attackProgress.current = -1
@@ -304,24 +367,25 @@ export default function Player() {
     // --- CAMERA ---
     const headHeight = 0.85 * scale
     if (cameraMode === 'first') {
-      // FPV — inside head, looking forward
-      const forwardX = Math.sin(currentYaw.current)
-      const forwardZ = Math.cos(currentYaw.current)
-      // Camera slightly forward from eye center so we don't see inside our own head
+      const yawC = currentYaw.current
+      const pitchC = mousePitch.current
       const camPos = camDesired.current.set(
-        pos.x + forwardX * 0.15 * scale,
+        pos.x,
         pos.y + headHeight,
-        pos.z + forwardZ * 0.15 * scale
+        pos.z
       )
-      state.camera.position.lerp(camPos, 1 - Math.exp(-20 * delta))
+      state.camera.position.copy(camPos)
+      // Look vector from yaw + pitch
+      const lookX = Math.sin(yawC) * Math.cos(pitchC)
+      const lookY = Math.sin(pitchC)
+      const lookZ = Math.cos(yawC) * Math.cos(pitchC)
       camLookAt.current.set(
-        pos.x + forwardX * 5,
-        pos.y + headHeight,
-        pos.z + forwardZ * 5
+        pos.x + lookX * 5,
+        pos.y + headHeight + lookY * 5,
+        pos.z + lookZ * 5
       )
       state.camera.lookAt(camLookAt.current)
     } else {
-      // Third person
       const camHeight = 6 + scale * 1.2
       const camBack = 12 + scale * 1.8
       camDesired.current.set(pos.x, pos.y + camHeight, pos.z + camBack)
@@ -339,7 +403,6 @@ export default function Player() {
         visualRoot.current.rotation.y = currentYaw.current
       }
       visualRoot.current.scale.setScalar(scale)
-      // FPV: hide character (we're inside the head)
       visualRoot.current.visible = cameraMode !== 'first' || isRagdoll.current
     }
 
@@ -379,7 +442,8 @@ export default function Player() {
     }
 
     if (bodyPivot.current) {
-      bodyPivot.current.rotation.y = Math.sin(walkPhase.current) * 0.12 * moveMag
+      bodyPivot.current.rotation.y =
+        Math.sin(walkPhase.current) * 0.12 * moveMag
     }
 
     if (leftLeg.current && rightLeg.current) {
@@ -449,7 +513,7 @@ export default function Player() {
       }
     }
 
-    // Fail-safe respawn if fell off world
+    // Fail-safe
     if (pos.y < -45) {
       body.current.setTranslation({ x: 0, y: 5, z: 0 }, true)
       body.current.setLinvel({ x: 0, y: 0, z: 0 }, true)
