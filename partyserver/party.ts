@@ -17,11 +17,21 @@ type PlayerState = {
   bodyColor: string
   hatKind: string
   hatColor: string
+  gender: string
+  hairColor: string
   lastSeen: number
 }
 
 type ClientMessage =
-  | { type: 'join'; nickname: string; bodyColor?: string; hatKind?: string; hatColor?: string }
+  | {
+      type: 'join'
+      nickname: string
+      bodyColor?: string
+      hatKind?: string
+      hatColor?: string
+      gender?: string
+      hairColor?: string
+    }
   | {
       type: 'state'
       x: number
@@ -35,6 +45,8 @@ type ClientMessage =
       bodyColor?: string
       hatKind?: string
       hatColor?: string
+      gender?: string
+      hairColor?: string
     }
   | { type: 'hit'; targetId: string; damage: number; knockX: number; knockY: number; knockZ: number }
   | { type: 'action'; action: string; target?: string }
@@ -58,6 +70,8 @@ type ServerMessage =
         bodyColor: string
         hatKind: string
         hatColor: string
+        gender: string
+        hairColor: string
       }[]
     }
   | {
@@ -105,6 +119,8 @@ export default class KomikOyunParty implements Party.Server {
       bodyColor: '#ef476f',
       hatKind: 'none',
       hatColor: '#1a1a1a',
+      gender: 'boy',
+      hairColor: '#3d2817',
       lastSeen: Date.now(),
     }
     this.players.set(conn.id, player)
@@ -135,6 +151,8 @@ export default class KomikOyunParty implements Party.Server {
       if (parsed.bodyColor) player.bodyColor = parsed.bodyColor
       if (parsed.hatKind) player.hatKind = parsed.hatKind
       if (parsed.hatColor) player.hatColor = parsed.hatColor
+      if (parsed.gender) player.gender = parsed.gender
+      if (parsed.hairColor) player.hairColor = parsed.hairColor
       this.room.broadcast(
         JSON.stringify({
           type: 'player_joined',
@@ -154,6 +172,8 @@ export default class KomikOyunParty implements Party.Server {
       if (parsed.bodyColor) player.bodyColor = parsed.bodyColor
       if (parsed.hatKind) player.hatKind = parsed.hatKind
       if (parsed.hatColor) player.hatColor = parsed.hatColor
+      if (parsed.gender) player.gender = parsed.gender
+      if (parsed.hairColor) player.hairColor = parsed.hairColor
       player.lastSeen = Date.now()
     } else if (parsed.type === 'hit') {
       // Relay hit to the target
@@ -209,6 +229,8 @@ export default class KomikOyunParty implements Party.Server {
         bodyColor: p.bodyColor,
         hatKind: p.hatKind,
         hatColor: p.hatColor,
+        gender: p.gender,
+        hairColor: p.hairColor,
       })),
     }
     this.room.broadcast(JSON.stringify(msg))

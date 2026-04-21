@@ -20,6 +20,8 @@ export type RemotePlayer = {
   bodyColor: string
   hatKind: string
   hatColor: string
+  gender: string
+  hairColor: string
 }
 
 export type LeaderboardEntry = {
@@ -116,7 +118,13 @@ export function unregisterHitHandler() {
 export function connect(
   nickname: string,
   room = 'public',
-  skin?: { bodyColor: string; hatKind: string; hatColor: string }
+  skin?: {
+    bodyColor: string
+    hatKind: string
+    hatColor: string
+    gender: string
+    hairColor: string
+  }
 ) {
   if (socket) return
   if (!PARTY_HOST) return
@@ -132,6 +140,8 @@ export function connect(
           bodyColor: skin?.bodyColor,
           hatKind: skin?.hatKind,
           hatColor: skin?.hatColor,
+          gender: skin?.gender,
+          hairColor: skin?.hairColor,
         })
       )
       notify()
@@ -185,6 +195,8 @@ export function connect(
               bodyColor: '#ef476f',
               hatKind: 'none',
               hatColor: '#1a1a1a',
+              gender: 'boy',
+              hairColor: '#3d2817',
             }),
             ...p,
           })
@@ -232,6 +244,8 @@ export function sendState(s: {
   bodyColor: string
   hatKind: string
   hatColor: string
+  gender: string
+  hairColor: string
 }) {
   if (!socket || !connected) return
   const now = performance.now()

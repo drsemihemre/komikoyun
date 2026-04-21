@@ -50,6 +50,8 @@ export default function StartScreen() {
       bodyColor: skin.bodyColor,
       hatKind: skin.hatKind,
       hatColor: skin.hatColor,
+      gender: skin.gender,
+      hairColor: skin.hairColor,
     })
     setGameStarted(true)
   }
@@ -91,7 +93,65 @@ export default function StartScreen() {
         {/* Skin picker */}
         <div className="mt-4 w-full max-w-md">
           <label className="mb-1 block text-center text-xs font-semibold uppercase tracking-wide text-white/80">
-            Renk
+            Karakter
+          </label>
+          <div className="mb-3 flex justify-center gap-2">
+            <button
+              onClick={() => setSkin({ gender: 'boy' })}
+              onTouchStart={(e) => {
+                e.preventDefault()
+                setSkin({ gender: 'boy' })
+              }}
+              className={`rounded-xl px-5 py-2 text-sm font-bold transition active:scale-95 ${
+                skin.gender === 'boy'
+                  ? 'bg-blue-400 text-white ring-2 ring-white scale-105'
+                  : 'bg-white/20 text-white hover:bg-white/30'
+              }`}
+            >
+              🧒 Erkek
+            </button>
+            <button
+              onClick={() => setSkin({ gender: 'girl' })}
+              onTouchStart={(e) => {
+                e.preventDefault()
+                setSkin({ gender: 'girl' })
+              }}
+              className={`rounded-xl px-5 py-2 text-sm font-bold transition active:scale-95 ${
+                skin.gender === 'girl'
+                  ? 'bg-pink-400 text-white ring-2 ring-white scale-105'
+                  : 'bg-white/20 text-white hover:bg-white/30'
+              }`}
+            >
+              👧 Kız
+            </button>
+          </div>
+
+          <label className="mb-1 block text-center text-xs font-semibold uppercase tracking-wide text-white/80">
+            Saç Rengi
+          </label>
+          <div className="mb-3 flex flex-wrap justify-center gap-2">
+            {['#3d2817', '#5d4037', '#c68642', '#e8a247', '#d4a574', '#f4d35e', '#1a1a1a', '#c62828'].map(
+              (c) => (
+                <button
+                  key={c}
+                  onClick={() => setSkin({ hairColor: c })}
+                  onTouchStart={(e) => {
+                    e.preventDefault()
+                    setSkin({ hairColor: c })
+                  }}
+                  className={`h-7 w-7 rounded-full border-2 transition-transform active:scale-95 ${
+                    skin.hairColor === c
+                      ? 'border-white ring-2 ring-white/80 scale-110'
+                      : 'border-white/30'
+                  }`}
+                  style={{ backgroundColor: c }}
+                />
+              )
+            )}
+          </div>
+
+          <label className="mb-1 block text-center text-xs font-semibold uppercase tracking-wide text-white/80">
+            Kıyafet Rengi
           </label>
           <div className="flex flex-wrap justify-center gap-2">
             {BODY_COLORS.map((c) => (

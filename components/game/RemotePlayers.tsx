@@ -6,6 +6,7 @@ import { Html } from '@react-three/drei'
 import { MathUtils, type Group } from 'three'
 import { getRemotes, subscribeMP, type RemotePlayer } from '@/lib/multiplayer'
 import { HatMesh } from './Player'
+import HairMesh from './HairMesh'
 
 export default function RemotePlayers() {
   const [players, setPlayers] = useState<RemotePlayer[]>([])
@@ -139,8 +140,12 @@ function RemotePlayerMesh({ player }: { player: RemotePlayer }) {
           <torusGeometry args={[0.22, 0.05, 6, 14, Math.PI]} />
           <meshBasicMaterial color="#b23a48" />
         </mesh>
-        {/* Hat — başın üstünde */}
+        {/* Saç + şapka — başın üstünde */}
         <group position={[0, 0.65, 0]}>
+          <HairMesh
+            gender={(player.gender || 'boy') as 'boy' | 'girl'}
+            color={player.hairColor || '#3d2817'}
+          />
           <HatMesh kind={hatKind} color={hatColor} />
         </group>
         {/* Legs — pivot gruplarıyla (sallanabilsin) */}

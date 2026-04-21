@@ -27,6 +27,7 @@ import {
 import { spawnImpact } from '@/lib/particles'
 import { TELEPORT_POINTS } from './SurprisePotions'
 import { getWeapon, tierMultiplier, type WeaponId } from '@/lib/weapons'
+import HairMesh from './HairMesh'
 import {
   sendState,
   sendHit,
@@ -91,6 +92,7 @@ export default function Player() {
   // FPV mouse look
   const mouseYaw = useRef(0)
   const mousePitch = useRef(0)
+  const lastMouseMoveT = useRef(0)
 
   const [, getKeys] = useKeyboardControls()
   const scale = useGameStore((s) => s.scale)
@@ -293,6 +295,10 @@ export default function Player() {
         PITCH_MIN,
         PITCH_MAX
       )
+      // Auto-follow'un fare drag'ini ezmesini önle
+      if (Math.abs(e.movementX) > 0.5 || Math.abs(e.movementY) > 0.5) {
+        lastMouseMoveT.current = performance.now()
+      }
     }
     document.addEventListener('mousemove', onMouseMove)
     return () => document.removeEventListener('mousemove', onMouseMove)
@@ -771,6 +777,24 @@ export default function Player() {
       state.camera.lookAt(camLookAt.current)
     } else {
       // 3. şahıs — mouseYaw/mousePitch ile orbit
+      // Otomatik takip: yürüyünce kamera arkaya süzülür (kullanıcı fare kaydırmıyorsa)
+      const sinceMouse = performance.now() - lastMouseMoveT.current
+      if (moveMag > 0.08 && sinceMouse > 500) {
+        // Hedef: mouseYaw = currentYaw + π (karakter'in arkası)
+        const targetCamYaw = currentYaw.current + Math.PI
+        mouseYaw.current = lerpAngle(
+          mouseYaw.current,
+          targetCamYaw,
+          1 - Math.exp(-1.8 * delta)
+        )
+        // Pitch de yavaşça sıfıra (omuz üstü) döner
+        mousePitch.current = MathUtils.damp(
+          mousePitch.current,
+          0,
+          1.5,
+          delta
+        )
+      }
       const camHeight = 6 + scale * 1.2
       const camBack = 12 + scale * 1.8
       const yaw = mouseYaw.current
@@ -925,6 +949,8 @@ export default function Player() {
       bodyColor: curState.skin.bodyColor,
       hatKind: curState.skin.hatKind,
       hatColor: curState.skin.hatColor,
+      gender: curState.skin.gender,
+      hairColor: curState.skin.hairColor,
     })
 
     // Fail-safe
@@ -996,7 +1022,9 @@ export default function Player() {
               <torusGeometry args={[0.22, 0.05, 6, 16, Math.PI]} />
               <meshBasicMaterial color="#b23a48" />
             </mesh>
-            {/* Şapka */}
+            {/* Saç (cinsiyete göre) */}
+            <HairMesh gender={skin.gender} color={skin.hairColor} />
+            {/* Şapka (saçın üstüne) */}
             <HatMesh kind={skin.hatKind} color={skin.hatColor} />
           </group>
           <group ref={leftArm} position={[0.55, 0.25, 0]}>

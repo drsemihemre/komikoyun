@@ -39,6 +39,8 @@ export type SkinPersist = {
   bodyColor: string
   hatKind: 'none' | 'cone' | 'cylinder' | 'crown' | 'beanie'
   hatColor: string
+  gender: 'boy' | 'girl'
+  hairColor: string
 }
 
 const SKIN_KEY = 'komikoyun_skin_v1'
@@ -46,6 +48,8 @@ const DEFAULT_SKIN: SkinPersist = {
   bodyColor: '#ef476f',
   hatKind: 'none',
   hatColor: '#1a1a1a',
+  gender: 'boy',
+  hairColor: '#3d2817',
 }
 
 export function loadSkin(): SkinPersist {
