@@ -1,5 +1,6 @@
 export type PlayerHandle = {
   getPos: () => { x: number; y: number; z: number } | null
+  getYaw: () => number
   takeHit: (damage: number, knockbackDir: [number, number, number]) => void
   isDown: () => boolean
   launch: (impulse: [number, number, number]) => void

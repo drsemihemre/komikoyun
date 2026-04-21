@@ -15,6 +15,9 @@ import PotionInventory from '../ui/PotionInventory'
 import StartScreen from '../ui/StartScreen'
 import PauseMenu from '../ui/PauseMenu'
 import ShopModal from '../ui/ShopModal'
+import GraphicsFx from './GraphicsFx'
+import BuildHud from '../ui/BuildHud'
+import MobileLookZone from '../ui/MobileLookZone'
 import { useGameStore } from '@/lib/store'
 import { getPlayerPos } from '@/lib/playerHandle'
 import { startMusic, startAmbient } from '@/lib/sounds'
@@ -126,6 +129,7 @@ export default function Game() {
             shadow-camera-far={150}
             shadow-bias={-0.0005}
           />
+          <GraphicsFx />
           <Physics gravity={[0, -22, 0]} interpolate paused={physicsPaused}>
             <ShadowFollower lightRef={lightRef} />
             <World />
@@ -138,6 +142,8 @@ export default function Game() {
       <MobileJoystick />
       <PauseMenu />
       <ShopModal />
+      <BuildHud />
+      <MobileLookZone />
       <StartScreen />
     </div>
   )

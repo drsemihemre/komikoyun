@@ -26,6 +26,9 @@ import SkyTraffic from './SkyTraffic'
 import DriveableKart from './DriveableKart'
 import RemotePlayers from './RemotePlayers'
 import Shop from './Shop'
+import Challenges from './Challenges'
+import PlacedBlocks from './PlacedBlocks'
+import SurprisePortal from './SurprisePortal'
 import { useGameStore } from '@/lib/store'
 
 export default function World() {
@@ -56,6 +59,9 @@ export default function World() {
       <DriveableKart />
       <Shop kind="buy" position={[-9, 0, 6]} />
       <Shop kind="upgrade" position={[9, 0, 6]} />
+      <Challenges />
+      <PlacedBlocks />
+      <SurprisePortal />
       <SpiralStairs position={[-16, 0, -4]} height={16} />
       <HitParticles />
       <RemotePlayers />

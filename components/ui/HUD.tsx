@@ -24,6 +24,8 @@ export default function HUD() {
   const toggleCamera = useGameStore((s) => s.toggleCamera)
   const togglePause = useGameStore((s) => s.togglePause)
   const gameStarted = useGameStore((s) => s.gameStarted)
+  const graphicsLevel = useGameStore((s) => s.graphicsLevel)
+  const cycleGraphicsLevel = useGameStore((s) => s.cycleGraphicsLevel)
   const jumpBoostUntil = useGameStore((s) => s.jumpBoostUntil)
   const teleportCharges = useGameStore((s) => s.teleportCharges)
   const currentWeapon = useGameStore((s) => s.currentWeapon)
@@ -255,6 +257,17 @@ export default function HUD() {
           title={muted ? 'Sesi aç' : 'Sesi kapat'}
         >
           {muted ? '🔇' : '🔊'}
+        </button>
+        <button
+          onClick={() => cycleGraphicsLevel()}
+          onTouchStart={(e) => {
+            e.preventDefault()
+            cycleGraphicsLevel()
+          }}
+          className="pointer-events-auto flex h-11 w-14 items-center justify-center rounded-xl bg-black/40 text-xs font-bold text-white shadow-lg backdrop-blur-sm transition hover:bg-black/60 active:scale-95"
+          title={`Grafik: ${graphicsLevel.toUpperCase()} (tıkla değiştir)`}
+        >
+          ✨{graphicsLevel === 'low' ? '1' : graphicsLevel === 'medium' ? '2' : '3'}
         </button>
         {gameStarted && (
           <button

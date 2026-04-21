@@ -35,6 +35,7 @@ import {
   registerHitHandler,
   unregisterHitHandler,
 } from '@/lib/multiplayer'
+import { computeBuildTarget } from './PlacedBlocks'
 
 const BASE_SPEED = 10
 const JUMP = 13
@@ -141,6 +142,7 @@ export default function Player() {
           )
         }
       },
+      getYaw: () => currentYaw.current,
       isDown: () => {
         const hp = useGameStore.getState().playerHP
         return hp <= 0 || isRagdoll.current
@@ -174,6 +176,31 @@ export default function Player() {
     })
     return () => unregisterPlayer()
   }, [scale])
+
+  // Build mode — B toggle, N cycle material, F place, G remove
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.repeat) return
+      const k = e.key.toLowerCase()
+      const store = useGameStore.getState()
+      if (!store.gameStarted || store.paused || store.shopOpen) return
+      if (k === 'b') {
+        store.toggleBuildMode()
+      } else if (k === 'n' && store.buildMode) {
+        store.cycleBuildMaterial()
+      } else if ((k === 'f' || k === 'q') && store.buildMode) {
+        // Build mode F = place, Q = remove (attack keys override)
+        const target = computeBuildTarget()
+        if (!target) return
+        if (k === 'f') store.placeBlockAt(target[0], target[1], target[2])
+        else store.removeBlockAt(target[0], target[1], target[2])
+        e.preventDefault()
+        e.stopPropagation()
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
 
   // Crouch — Shift hold
   useEffect(() => {
@@ -283,6 +310,24 @@ export default function Player() {
     document.addEventListener('pointerlockchange', onLockChange)
     return () =>
       document.removeEventListener('pointerlockchange', onLockChange)
+  }, [])
+
+  // Mobile touch look — FPV'de dokunmatik kamera dönüşü
+  useEffect(() => {
+    const MOBILE_SENS = 0.006
+    const onMobileLook = (e: Event) => {
+      const detail = (e as CustomEvent<{ dx: number; dy: number }>).detail
+      if (!detail) return
+      mouseYaw.current -= detail.dx * MOBILE_SENS
+      mousePitch.current = MathUtils.clamp(
+        mousePitch.current - detail.dy * MOBILE_SENS,
+        PITCH_MIN,
+        PITCH_MAX
+      )
+      lastMouseMoveT.current = performance.now()
+    }
+    window.addEventListener('mobile-look', onMobileLook)
+    return () => window.removeEventListener('mobile-look', onMobileLook)
   }, [])
 
   // Mouse look — FPV'de karakter yönü, 3. şahıs'ta kamera orbit
@@ -587,12 +632,13 @@ export default function Player() {
         playJump()
       }
 
-      // ATTACK
+      // ATTACK (build mode'da devre dışı — F/Q blok yerleştiriyor)
       const attackHeld = keys.attack || mobileAttack
       const attackEdge = attackHeld && !wasAttackPressed.current
       wasAttackPressed.current = attackHeld
+      const buildModeNow = useGameStore.getState().buildMode
 
-      if (attackEdge && now - lastAttackT.current > 0.35) {
+      if (attackEdge && !buildModeNow && now - lastAttackT.current > 0.35) {
         const dxS = pos.x - SAFE_ZONE.center[0]
         const dzS = pos.z - SAFE_ZONE.center[2]
         const inSafe = Math.hypot(dxS, dzS) < SAFE_ZONE.radius
@@ -997,29 +1043,67 @@ export default function Player() {
             </mesh>
           </group>
           <group ref={headPivot} position={[0, 0.65, 0]}>
+            {/* Kafa — daha yumuşak (24 seg) */}
             <mesh position={[0, 0.15, 0]} castShadow>
-              <sphereGeometry args={[0.7, 18, 18]} />
+              <sphereGeometry args={[0.7, 24, 20]} />
               <meshToonMaterial color="#ffd89c" />
             </mesh>
-            <mesh position={[0.25, 0.25, 0.58]}>
-              <sphereGeometry args={[0.12, 10, 10]} />
-              <meshBasicMaterial color="#1a1a1a" />
-            </mesh>
-            <mesh position={[-0.25, 0.25, 0.58]}>
-              <sphereGeometry args={[0.12, 10, 10]} />
-              <meshBasicMaterial color="#1a1a1a" />
-            </mesh>
-            <mesh position={[0.28, 0.3, 0.66]}>
-              <sphereGeometry args={[0.04, 8, 8]} />
+            {/* Beyaz sclera */}
+            <mesh position={[0.22, 0.25, 0.55]}>
+              <sphereGeometry args={[0.16, 14, 14]} />
               <meshBasicMaterial color="#ffffff" />
             </mesh>
-            <mesh position={[-0.22, 0.3, 0.66]}>
-              <sphereGeometry args={[0.04, 8, 8]} />
+            <mesh position={[-0.22, 0.25, 0.55]}>
+              <sphereGeometry args={[0.16, 14, 14]} />
               <meshBasicMaterial color="#ffffff" />
             </mesh>
-            {/* Basit gülüş */}
-            <mesh position={[0, -0.05, 0.65]} rotation={[Math.PI, 0, 0]}>
-              <torusGeometry args={[0.22, 0.05, 6, 16, Math.PI]} />
+            {/* Mavi iris */}
+            <mesh position={[0.22, 0.25, 0.66]}>
+              <sphereGeometry args={[0.09, 12, 12]} />
+              <meshBasicMaterial color="#2b6cb0" />
+            </mesh>
+            <mesh position={[-0.22, 0.25, 0.66]}>
+              <sphereGeometry args={[0.09, 12, 12]} />
+              <meshBasicMaterial color="#2b6cb0" />
+            </mesh>
+            {/* Siyah pupil */}
+            <mesh position={[0.22, 0.25, 0.72]}>
+              <sphereGeometry args={[0.045, 10, 10]} />
+              <meshBasicMaterial color="#1a1a1a" />
+            </mesh>
+            <mesh position={[-0.22, 0.25, 0.72]}>
+              <sphereGeometry args={[0.045, 10, 10]} />
+              <meshBasicMaterial color="#1a1a1a" />
+            </mesh>
+            {/* Beyaz parlaklık — canlandırıcı */}
+            <mesh position={[0.25, 0.3, 0.745]}>
+              <sphereGeometry args={[0.025, 8, 8]} />
+              <meshBasicMaterial color="#ffffff" />
+            </mesh>
+            <mesh position={[-0.19, 0.3, 0.745]}>
+              <sphereGeometry args={[0.025, 8, 8]} />
+              <meshBasicMaterial color="#ffffff" />
+            </mesh>
+            {/* Küçük burun */}
+            <mesh position={[0, 0.1, 0.72]}>
+              <sphereGeometry args={[0.06, 12, 10]} />
+              <meshToonMaterial color="#e8a27a" />
+            </mesh>
+            {/* Pembe yanak */}
+            <mesh position={[0.42, 0.08, 0.55]}>
+              <sphereGeometry args={[0.1, 10, 10]} />
+              <meshBasicMaterial color="#ff8fab" transparent opacity={0.55} />
+            </mesh>
+            <mesh position={[-0.42, 0.08, 0.55]}>
+              <sphereGeometry args={[0.1, 10, 10]} />
+              <meshBasicMaterial color="#ff8fab" transparent opacity={0.55} />
+            </mesh>
+            {/* Gülüş — daha pürüzsüz */}
+            <mesh
+              position={[0, -0.05, 0.66]}
+              rotation={[Math.PI, 0, 0]}
+            >
+              <torusGeometry args={[0.22, 0.045, 8, 20, Math.PI]} />
               <meshBasicMaterial color="#b23a48" />
             </mesh>
             {/* Saç (cinsiyete göre) */}
@@ -1042,22 +1126,42 @@ export default function Player() {
           </group>
           <group ref={leftLeg} position={[0.22, -0.5, 0]}>
             <mesh position={[0, -0.3, 0]} castShadow>
-              <cylinderGeometry args={[0.18, 0.22, 0.5, 10]} />
+              <cylinderGeometry args={[0.18, 0.22, 0.5, 14]} />
               <meshToonMaterial color="#118ab2" />
             </mesh>
-            <mesh position={[0, -0.6, 0.1]} castShadow>
-              <boxGeometry args={[0.28, 0.15, 0.4]} />
+            {/* Daha yumuşak ayakkabı — oval küre */}
+            <mesh
+              position={[0, -0.6, 0.12]}
+              scale={[1, 0.55, 1.4]}
+              castShadow
+            >
+              <sphereGeometry args={[0.16, 14, 10]} />
               <meshToonMaterial color="#1a1a1a" />
+            </mesh>
+            {/* Ayakkabı şeridi */}
+            <mesh position={[0, -0.57, 0.2]}>
+              <boxGeometry args={[0.22, 0.04, 0.04]} />
+              <meshBasicMaterial color="#ffffff" />
             </mesh>
           </group>
           <group ref={rightLeg} position={[-0.22, -0.5, 0]}>
             <mesh position={[0, -0.3, 0]} castShadow>
-              <cylinderGeometry args={[0.18, 0.22, 0.5, 10]} />
+              <cylinderGeometry args={[0.18, 0.22, 0.5, 14]} />
               <meshToonMaterial color="#118ab2" />
             </mesh>
-            <mesh position={[0, -0.6, 0.1]} castShadow>
-              <boxGeometry args={[0.28, 0.15, 0.4]} />
+            {/* Daha yumuşak ayakkabı — oval küre */}
+            <mesh
+              position={[0, -0.6, 0.12]}
+              scale={[1, 0.55, 1.4]}
+              castShadow
+            >
+              <sphereGeometry args={[0.16, 14, 10]} />
               <meshToonMaterial color="#1a1a1a" />
+            </mesh>
+            {/* Ayakkabı şeridi */}
+            <mesh position={[0, -0.57, 0.2]}>
+              <boxGeometry args={[0.22, 0.04, 0.04]} />
+              <meshBasicMaterial color="#ffffff" />
             </mesh>
           </group>
         </group>

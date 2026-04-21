@@ -33,6 +33,18 @@ type GameState = {
   // Crouch
   crouching: boolean
   mobileCrouch: boolean
+  // Graphics
+  graphicsLevel: 'low' | 'medium' | 'high'
+  // Build mode
+  buildMode: boolean
+  buildMaterial: 'stone' | 'wood' | 'glass' | 'brick' | 'grass'
+  placedBlocks: Array<{
+    id: string
+    x: number
+    y: number
+    z: number
+    material: string
+  }>
   // Potion-driven effects
   scale: number
   speedMult: number
@@ -69,6 +81,13 @@ type GameState = {
   openShop: (kind: 'buy' | 'upgrade' | null) => void
   setCrouching: (b: boolean) => void
   setMobileCrouch: (b: boolean) => void
+  setGraphicsLevel: (l: 'low' | 'medium' | 'high') => void
+  cycleGraphicsLevel: () => void
+  toggleBuildMode: () => void
+  cycleBuildMaterial: () => void
+  placeBlockAt: (x: number, y: number, z: number) => void
+  removeBlockAt: (x: number, y: number, z: number) => void
+  clearBlocks: () => void
   drinkPotion: (p: PotionType) => void
   resetPotions: () => void
   incrementHitCount: () => void
@@ -127,6 +146,27 @@ export const useGameStore = create<GameState>((set) => ({
   shopOpen: null,
   crouching: false,
   mobileCrouch: false,
+  graphicsLevel:
+    typeof window !== 'undefined'
+      ? ((window.localStorage.getItem('komikoyun_graphics') as
+          | 'low'
+          | 'medium'
+          | 'high'
+          | null) ?? 'medium')
+      : 'medium',
+  buildMode: false,
+  buildMaterial: 'stone',
+  placedBlocks:
+    typeof window !== 'undefined'
+      ? (() => {
+          try {
+            const raw = window.localStorage.getItem('komikoyun_blocks_v1')
+            return raw ? JSON.parse(raw) : []
+          } catch {
+            return []
+          }
+        })()
+      : [],
   scale: 1,
   speedMult: 1,
   potionHits: { grow: 0, shrink: 0, speed: 0, slow: 0 },
@@ -205,6 +245,87 @@ export const useGameStore = create<GameState>((set) => ({
   openShop: (shopOpen) => set({ shopOpen }),
   setCrouching: (crouching) => set({ crouching }),
   setMobileCrouch: (mobileCrouch) => set({ mobileCrouch }),
+  setGraphicsLevel: (graphicsLevel) => {
+    try {
+      window.localStorage.setItem('komikoyun_graphics', graphicsLevel)
+    } catch {}
+    set({ graphicsLevel })
+  },
+  cycleGraphicsLevel: () => {
+    const cur = useGameStore.getState().graphicsLevel
+    const next: 'low' | 'medium' | 'high' =
+      cur === 'low' ? 'medium' : cur === 'medium' ? 'high' : 'low'
+    useGameStore.getState().setGraphicsLevel(next)
+  },
+  toggleBuildMode: () =>
+    set((s) => ({ buildMode: !s.buildMode })),
+  cycleBuildMaterial: () =>
+    set((s) => {
+      const order: Array<'stone' | 'wood' | 'glass' | 'brick' | 'grass'> = [
+        'stone',
+        'wood',
+        'glass',
+        'brick',
+        'grass',
+      ]
+      const idx = order.indexOf(s.buildMaterial)
+      return { buildMaterial: order[(idx + 1) % order.length] }
+    }),
+  placeBlockAt: (x, y, z) =>
+    set((s) => {
+      // Grid snap
+      const gx = Math.round(x)
+      const gy = Math.round(y)
+      const gz = Math.round(z)
+      // Aynı pozisyonda blok varsa koyma
+      if (
+        s.placedBlocks.some((b) => b.x === gx && b.y === gy && b.z === gz)
+      ) {
+        return {}
+      }
+      const newBlocks = [
+        ...s.placedBlocks,
+        {
+          id: `b${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          x: gx,
+          y: gy,
+          z: gz,
+          material: s.buildMaterial,
+        },
+      ]
+      try {
+        window.localStorage.setItem(
+          'komikoyun_blocks_v1',
+          JSON.stringify(newBlocks)
+        )
+      } catch {}
+      return { placedBlocks: newBlocks }
+    }),
+  removeBlockAt: (x, y, z) =>
+    set((s) => {
+      const gx = Math.round(x)
+      const gy = Math.round(y)
+      const gz = Math.round(z)
+      const idx = s.placedBlocks.findIndex(
+        (b) => b.x === gx && b.y === gy && b.z === gz
+      )
+      if (idx === -1) return {}
+      const newBlocks = s.placedBlocks.filter((_, i) => i !== idx)
+      try {
+        window.localStorage.setItem(
+          'komikoyun_blocks_v1',
+          JSON.stringify(newBlocks)
+        )
+      } catch {}
+      return { placedBlocks: newBlocks }
+    }),
+  clearBlocks: () =>
+    set(() => {
+      try {
+        window.localStorage.removeItem('komikoyun_blocks_v1')
+      } catch {}
+      return { placedBlocks: [] }
+    }),
 
   drinkPotion: (p) =>
     set((state) => {
@@ -334,4 +455,4 @@ export const ARENA = {
 }
 
 // Map dimensions (world square, half-extent)
-export const MAP_HALF = 115 // 230x230 playing field (2× önceki)
+export const MAP_HALF = 230 // 460x460 playing field (bir kat daha büyüdü)
