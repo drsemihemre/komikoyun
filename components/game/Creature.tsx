@@ -361,6 +361,27 @@ export default function Creature({
 
     const pos = body.current.translation()
 
+    // Dünya dışı fail-safe: y çok düşükse veya haritadan çok uzakta → arenaya döndür
+    if (pos.y < -15 || Math.abs(pos.x) > 240 || Math.abs(pos.z) > 240) {
+      const ang = Math.random() * Math.PI * 2
+      const r = Math.random() * (arenaRadius - 3)
+      body.current.setTranslation(
+        {
+          x: arenaCenter[0] + Math.cos(ang) * r,
+          y: 2,
+          z: arenaCenter[2] + Math.sin(ang) * r,
+        },
+        true
+      )
+      body.current.setLinvel({ x: 0, y: 0, z: 0 }, true)
+      body.current.setAngvel({ x: 0, y: 0, z: 0 }, true)
+      body.current.setEnabledRotations(false, true, false, true)
+      body.current.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true)
+      isRagdoll.current = false
+      hp.current = variant.hp
+      return
+    }
+
     // Gündüz: çok uzaklaştılarsa arenaya geri ışınla
     if (!canLeaveArena) {
       const ax = pos.x - arenaCenter[0]

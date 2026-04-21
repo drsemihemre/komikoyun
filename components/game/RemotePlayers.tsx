@@ -33,6 +33,7 @@ function RemotePlayerMesh({ player }: { player: RemotePlayer }) {
   const leftLeg = useRef<Group>(null)
   const rightLeg = useRef<Group>(null)
   const bodyTilt = useRef<Group>(null)
+  const initialized = useRef(false)
   const target = useRef({
     x: player.x,
     y: player.y,
@@ -55,6 +56,17 @@ function RemotePlayerMesh({ player }: { player: RemotePlayer }) {
   useFrame((state, delta) => {
     if (!groupRef.current) return
     const g = groupRef.current
+    // İlk frame'de anında snap et (uzak yerden lerping görünmesin)
+    if (!initialized.current) {
+      g.position.set(target.current.x, target.current.y, target.current.z)
+      g.rotation.y = target.current.yaw
+      prev.current = {
+        x: target.current.x,
+        z: target.current.z,
+        t: state.clock.elapsedTime,
+      }
+      initialized.current = true
+    }
     const t = 1 - Math.exp(-14 * delta)
     g.position.x += (target.current.x - g.position.x) * t
     g.position.y += (target.current.y - g.position.y) * t
@@ -116,7 +128,7 @@ function RemotePlayerMesh({ player }: { player: RemotePlayer }) {
   const hatColor = player.hatColor || '#1a1a1a'
 
   return (
-    <group ref={groupRef} position={[player.x, player.y, player.z]}>
+    <group ref={groupRef}>
       <group ref={bodyTilt}>
         {/* Body */}
         <mesh position={[0, -0.1, 0]} castShadow>

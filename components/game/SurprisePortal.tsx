@@ -1,18 +1,17 @@
 'use client'
 
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState, useEffect } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Html } from '@react-three/drei'
 import { RigidBody, CuboidCollider } from '@react-three/rapier'
 import type { Group, Mesh } from 'three'
 import { getPlayerHandle } from '@/lib/playerHandle'
 import { spawnImpact } from '@/lib/particles'
-import { playLaunch } from '@/lib/sounds'
+import { playLaunch, playKo } from '@/lib/sounds'
 import { useGameStore } from '@/lib/store'
 
-// Ana dünyada portal (pembe-mor ring) + uzakta ayrı "sürpriz oyun alanı"
-// Walk-in → teleport (+150 Y, farklı coord)
-// Dönüş portalı gerisine ışınlar
+// Ana dünyada portal + uzak uçan adada brainrot-benzeri mini oyun
+// 2 mod: Klasik (topla+skor) ve Tsunami (su dalgasından kaç)
 
 const MAIN_PORTAL: [number, number, number] = [0, 1.5, 60]
 const ZONE_CENTER: [number, number, number] = [400, 150, 400]
@@ -33,7 +32,7 @@ export default function SurprisePortal() {
       />
       <BrainrotZone center={ZONE_CENTER} />
       <Portal
-        position={[ZONE_CENTER[0], ZONE_CENTER[1] + 1.5, ZONE_CENTER[2]]}
+        position={[ZONE_CENTER[0], ZONE_CENTER[1] + 1.5, ZONE_CENTER[2] - 13]}
         destination={[MAIN_PORTAL[0], MAIN_PORTAL[1] + 1.5, MAIN_PORTAL[2] + 3]}
         label="🚪 Dünyaya Dön"
         frameColor="#ffd60a"
@@ -82,7 +81,6 @@ function Portal({
 
   return (
     <group position={position}>
-      {/* Oval çerçeve */}
       <mesh ref={ringRef} rotation={[0, 0, 0]}>
         <torusGeometry args={[2, 0.3, 12, 32]} />
         <meshStandardMaterial
@@ -92,7 +90,6 @@ function Portal({
           toneMapped={false}
         />
       </mesh>
-      {/* İç "portal" yüzeyi — renkli düzlem */}
       <mesh>
         <circleGeometry args={[1.8, 32]} />
         <meshBasicMaterial color={innerColor} transparent opacity={0.65} />
@@ -110,9 +107,12 @@ function Portal({
   )
 }
 
-// Brainrot-benzeri ayrı alan: yukarıda yüzen platform + komik karakterler
+type Mode = 'classic' | 'tsunami'
+
 function BrainrotZone({ center }: { center: [number, number, number] }) {
   const [cx, cy, cz] = center
+  const [mode, setMode] = useState<Mode>('classic')
+  const [waveT, setWaveT] = useState(0)
 
   const figures = useMemo(() => {
     let seed = 42
@@ -131,6 +131,8 @@ function BrainrotZone({ center }: { center: [number, number, number] }) {
       'Kedikesekoltuk',
       'Firavunfaresi',
       'Dondurma-Fil',
+      'Gergedan-Spor',
+      'Kanarya-Roket',
     ]
     return names.map((n, i) => {
       const ang = (i / names.length) * Math.PI * 2
@@ -146,76 +148,237 @@ function BrainrotZone({ center }: { center: [number, number, number] }) {
   }, [])
 
   const platformRef = useRef<Group>(null)
-  useFrame((state) => {
+  useFrame((state, delta) => {
     if (!platformRef.current) return
     const t = state.clock.elapsedTime
     platformRef.current.position.y = Math.sin(t * 0.4) * 0.3
-    platformRef.current.rotation.y = t * 0.05
+    platformRef.current.rotation.y = t * 0.03
+    if (mode === 'tsunami') {
+      setWaveT((prev) => (prev + delta / 10) % 1)
+    }
   })
 
   return (
     <group position={[cx, cy, cz]}>
       <group ref={platformRef}>
-        {/* Uçan ada zemini */}
+        {/* Uçan ada zemini — geniş platform */}
         <RigidBody type="fixed" colliders={false}>
-          <CuboidCollider args={[14, 0.5, 14]} position={[0, -0.5, 0]} />
+          <CuboidCollider args={[20, 0.5, 20]} position={[0, -0.5, 0]} />
           <mesh position={[0, -0.5, 0]} castShadow receiveShadow>
-            <cylinderGeometry args={[16, 14, 1, 32]} />
-            <meshToonMaterial color="#ff00ff" />
+            <cylinderGeometry args={[22, 20, 1, 40]} />
+            <meshToonMaterial color="#ff77ee" />
           </mesh>
-          {/* Alt dekoratif sarkıklar */}
           <mesh position={[0, -2, 0]} castShadow>
-            <coneGeometry args={[12, 6, 24]} />
-            <meshToonMaterial color="#9d4edd" />
+            <coneGeometry args={[16, 7, 32]} />
+            <meshToonMaterial color="#a84ed0" />
           </mesh>
         </RigidBody>
 
-        {/* Sign */}
-        <mesh position={[0, 6, -10]} castShadow>
-          <boxGeometry args={[8, 2, 0.3]} />
+        {/* Ana başlık */}
+        <mesh position={[0, 7, -17]} castShadow>
+          <boxGeometry args={[14, 3, 0.4]} />
           <meshToonMaterial color="#ff006e" />
         </mesh>
-        <Html position={[0, 6, -9.8]} center distanceFactor={16} zIndexRange={[10, 0]}>
-          <div className="pointer-events-none whitespace-nowrap rounded-lg bg-black/0 px-2 text-2xl font-black text-white drop-shadow-[2px_2px_0_#000]">
-            🎮 SÜRPRİZ DÜNYA
+        <Html position={[0, 7, -16.8]} center distanceFactor={18} zIndexRange={[10, 0]}>
+          <div className="pointer-events-none whitespace-nowrap px-2 text-3xl font-black text-white drop-shadow-[3px_3px_0_#000]">
+            🎮 STEAL A BRAINROT
           </div>
         </Html>
 
-        {/* Komik koleksiyon figürleri */}
-        {figures.map((f, i) => (
-          <BrainrotFigure key={i} {...f} />
-        ))}
+        {/* Mod seçim tabelaları — iki tabla */}
+        <ModeSign
+          label="🎯 Klasik Mod"
+          desc="Yaratıkları topla"
+          active={mode === 'classic'}
+          position={[-10, 2, -8]}
+          onClick={() => setMode('classic')}
+        />
+        <ModeSign
+          label="🌊 Tsunami Modu"
+          desc="Dalgadan kaç!"
+          active={mode === 'tsunami'}
+          position={[10, 2, -8]}
+          onClick={() => setMode('tsunami')}
+        />
 
-        {/* Dekoratif renkli topaç */}
-        <mesh position={[0, 2, 0]} castShadow>
-          <sphereGeometry args={[1, 18, 18]} />
-          <meshStandardMaterial
-            color="#ffd60a"
-            emissive="#ffd60a"
-            emissiveIntensity={0.8}
-            toneMapped={false}
-          />
-        </mesh>
-
-        {/* Ses simgesi notaları — yüzer */}
-        {[...Array(8)].map((_, i) => {
-          const a = (i / 8) * Math.PI * 2
-          return (
-            <Html
-              key={`n${i}`}
-              position={[Math.cos(a) * 6, 3 + Math.sin(a * 3) * 0.5, Math.sin(a) * 6]}
-              center
-              distanceFactor={12}
-              zIndexRange={[10, 0]}
-            >
-              <div className="pointer-events-none select-none text-3xl">
-                🎵
-              </div>
-            </Html>
-          )
-        })}
+        {/* Mode-specific content */}
+        {mode === 'classic' && (
+          <ClassicMode figures={figures} />
+        )}
+        {mode === 'tsunami' && <TsunamiMode waveT={waveT} />}
       </group>
     </group>
+  )
+}
+
+function ModeSign({
+  label,
+  desc,
+  active,
+  position,
+  onClick,
+}: {
+  label: string
+  desc: string
+  active: boolean
+  position: [number, number, number]
+  onClick: () => void
+}) {
+  const ref = useRef<Group>(null)
+  const lastTapT = useRef(-10)
+  const glowRef = useRef<Mesh>(null)
+
+  useFrame((state) => {
+    const t = state.clock.elapsedTime
+    if (ref.current) ref.current.position.y = position[1] + Math.sin(t * 1.5) * 0.1
+    if (glowRef.current && active) {
+      const s = 1 + Math.sin(t * 3) * 0.1
+      glowRef.current.scale.set(s, s, s)
+    }
+    const player = getPlayerHandle()
+    const pp = player?.getPos()
+    if (!pp) return
+    // Parent pozisyonu dahil etmek için world position kullan
+    if (ref.current) {
+      const worldPos = ref.current.getWorldPosition(
+        ref.current.position.clone()
+      )
+      const dx = pp.x - worldPos.x
+      const dz = pp.z - worldPos.z
+      if (Math.hypot(dx, dz) < 2 && Math.abs(pp.y - worldPos.y) < 3) {
+        if (t - lastTapT.current > 1.5) {
+          lastTapT.current = t
+          if (!active) onClick()
+        }
+      }
+    }
+  })
+
+  return (
+    <group ref={ref} position={position}>
+      <mesh ref={glowRef} castShadow>
+        <boxGeometry args={[4, 1.4, 0.3]} />
+        <meshStandardMaterial
+          color={active ? '#ffd60a' : '#4a5568'}
+          emissive={active ? '#ffd60a' : '#000'}
+          emissiveIntensity={active ? 0.8 : 0}
+          toneMapped={false}
+        />
+      </mesh>
+      <Html position={[0, 0, 0.2]} center distanceFactor={10} zIndexRange={[10, 0]}>
+        <div
+          className={`pointer-events-none flex flex-col items-center whitespace-nowrap px-2 py-0.5 text-sm font-bold ${
+            active ? 'text-black' : 'text-white'
+          }`}
+        >
+          <div>{label}</div>
+          <div className="text-[10px] opacity-80">{desc}</div>
+        </div>
+      </Html>
+    </group>
+  )
+}
+
+function ClassicMode({
+  figures,
+}: {
+  figures: Array<{
+    name: string
+    x: number
+    z: number
+    hue: number
+    shape: string
+  }>
+}) {
+  return (
+    <>
+      {/* Merkez koleksiyon kaidesi */}
+      <mesh position={[0, 1, 0]} castShadow>
+        <cylinderGeometry args={[2, 2.3, 1, 20]} />
+        <meshToonMaterial color="#ffd60a" />
+      </mesh>
+      <mesh position={[0, 2, 0]}>
+        <sphereGeometry args={[0.8, 16, 16]} />
+        <meshStandardMaterial
+          color="#ffd60a"
+          emissive="#ffd60a"
+          emissiveIntensity={0.8}
+          toneMapped={false}
+        />
+      </mesh>
+      {figures.map((f, i) => (
+        <BrainrotFigure key={i} {...f} />
+      ))}
+    </>
+  )
+}
+
+function TsunamiMode({ waveT }: { waveT: number }) {
+  // Dalga -22 → +22 arası ilerler, 10sn döngü
+  const waveX = -22 + waveT * 44
+  const waveRef = useRef<Mesh>(null)
+  const lastHitT = useRef(0)
+
+  useFrame((state) => {
+    if (!waveRef.current) return
+    const t = state.clock.elapsedTime
+    waveRef.current.position.x = waveX
+    waveRef.current.scale.y = 1 + Math.sin(t * 4) * 0.15
+
+    // Oyuncu dalganın içinde mi?
+    const player = getPlayerHandle()
+    const pp = player?.getPos()
+    if (!pp) return
+    // World pos hesapla - zone center bilmiyoruz ama parent zaten konumlandırılmış
+    if (waveRef.current) {
+      const wp = waveRef.current.getWorldPosition(
+        waveRef.current.position.clone()
+      )
+      const dx = pp.x - wp.x
+      if (Math.abs(dx) < 2 && Math.abs(pp.y - wp.y) < 4) {
+        if (t - lastHitT.current > 1) {
+          lastHitT.current = t
+          player?.takeHit(10, [Math.sign(waveX + 0.01) * 12, 4, 0])
+          spawnImpact(pp.x, pp.y + 0.5, pp.z, '#4aa3df', 2)
+          playKo()
+        }
+      }
+    }
+  })
+
+  return (
+    <>
+      {/* Dev su dalgası — hareket eden duvar */}
+      <mesh ref={waveRef} position={[-22, 3, 0]} castShadow>
+        <boxGeometry args={[3, 6, 40]} />
+        <meshStandardMaterial
+          color="#4aa3df"
+          emissive="#1e90ff"
+          emissiveIntensity={0.4}
+          transparent
+          opacity={0.85}
+          metalness={0.6}
+          roughness={0.25}
+        />
+      </mesh>
+      {/* Dalganın üstünde köpük */}
+      <mesh position={[waveX, 6.5, 0]}>
+        <boxGeometry args={[3.5, 0.8, 41]} />
+        <meshBasicMaterial color="#ffffff" transparent opacity={0.7} />
+      </mesh>
+
+      {/* Hayatta kalma talimatı */}
+      <Html
+        position={[0, 5, 0]}
+        center
+        distanceFactor={12}
+        zIndexRange={[10, 0]}
+      >
+        <div className="pointer-events-none whitespace-nowrap rounded-xl bg-black/80 px-4 py-2 text-xl font-black text-white shadow-xl">
+          🌊 DALGADAN KAÇ! Zıpla veya koş!
+        </div>
+      </Html>
+    </>
   )
 }
 
@@ -234,41 +397,51 @@ function BrainrotFigure({
 }) {
   const groupRef = useRef<Group>(null)
   const [picked, setPicked] = useState(false)
+  const [respawnAt, setRespawnAt] = useState(0)
+
+  useEffect(() => {
+    if (picked) {
+      const at = performance.now() / 1000 + 15
+      setRespawnAt(at)
+    }
+  }, [picked])
 
   useFrame((state) => {
     if (!groupRef.current) return
     const t = state.clock.elapsedTime
-    groupRef.current.position.y = Math.sin(t * 2 + x) * 0.2
+    if (picked) {
+      if (t > respawnAt) {
+        setPicked(false)
+        groupRef.current.visible = true
+      } else {
+        groupRef.current.visible = false
+      }
+      return
+    }
+    groupRef.current.position.y = Math.sin(t * 2 + x) * 0.2 + 1
     groupRef.current.rotation.y = t * 0.5
 
-    if (picked) return
     const player = getPlayerHandle()
     const pp = player?.getPos()
     if (!pp) return
-    const dx = pp.x - (x + 400)
-    const dz = pp.z - (z + 400)
-    // Absolute check — zone is at (400, 150, 400); figure positions are local
-    // Convert local to world: add parent group position
-    const worldX = groupRef.current.parent?.parent?.position.x ?? 0
-    const worldZ = groupRef.current.parent?.parent?.position.z ?? 0
-    const dx2 = pp.x - (worldX + x)
-    const dz2 = pp.z - (worldZ + z)
-    if (Math.hypot(dx2, dz2) < 1.5 && Math.abs(pp.y - 150) < 4) {
+    // world pos
+    const wp = groupRef.current.getWorldPosition(
+      groupRef.current.position.clone()
+    )
+    if (
+      Math.hypot(pp.x - wp.x, pp.z - wp.z) < 1.5 &&
+      Math.abs(pp.y - wp.y) < 4
+    ) {
       setPicked(true)
       useGameStore.getState().addScore(30)
     }
-    void dx
-    void dz
     void hue
   })
-
-  if (picked) return null
 
   const color = `hsl(${hue}, 80%, 60%)`
 
   return (
-    <group ref={groupRef} position={[x, 2, z]}>
-      {/* Gövde — shape'e göre farklı */}
+    <group ref={groupRef} position={[x, 1, z]}>
       {shape === 'cube' && (
         <mesh castShadow>
           <boxGeometry args={[1, 1.2, 1]} />
@@ -293,7 +466,6 @@ function BrainrotFigure({
           <meshToonMaterial color={color} />
         </mesh>
       )}
-      {/* Büyük komik gözler */}
       <mesh position={[0.3, 0.35, 0.5]}>
         <sphereGeometry args={[0.22, 12, 12]} />
         <meshBasicMaterial color="white" />

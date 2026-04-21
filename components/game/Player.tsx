@@ -44,8 +44,9 @@ const INPUT_SMOOTH = 16
 const ROT_SMOOTH = 10
 const WALK_HZ = 7
 
-const FALL_AIRTIME = 0.9
-const FALL_VEL_Y = -18
+// Ragdoll sadece gerçekten yüksekten düşünce (daha toleranslı)
+const FALL_AIRTIME = 1.6
+const FALL_VEL_Y = -28
 const RAGDOLL_MIN_DURATION = 1.5
 const RAGDOLL_SETTLE_TIME = 0.7
 
