@@ -100,6 +100,9 @@ type GameState = {
   brainrotBuy: (defId: string, price: number) => boolean
   brainrotEarn: (amount: number) => void
   brainrotLockSlot: (slotIdx: number) => boolean
+  brainrotSell: (slotIdx: number) => boolean
+  brainrotApplySteal: (slotIdx: number) => boolean // başkası çaldı → sen kaybet
+  brainrotReceiveStolen: (defId: string) => boolean // başkasından çalındı → sen kazan
   brainrotReset: () => void
   drinkPotion: (p: PotionType) => void
   resetPotions: () => void
@@ -426,6 +429,66 @@ export const useGameStore = create<GameState>((set) => ({
       brainrotCash: newCash,
       brainrotOwned: updated,
     })
+    return true
+  },
+  brainrotSell: (slotIdx) => {
+    const s = useGameStore.getState()
+    const owned = s.brainrotOwned.find((o) => o.slotIdx === slotIdx)
+    if (!owned) return false
+    // defId'den fiyat bulmak için brainrots.ts kullanılmalı — dynamic import yok,
+    // bunun yerine action sadece owned'ı kaldırıp cash'e '0' ekler,
+    // gerçek sellPrice hesabı çağıran tarafta verilir.
+    // Basitlik için burada sellPrice'ı parametreli versiyon değil —
+    // sadece slotu kaldır, cash'i UI tarafında brainrotEarn ile ekle.
+    const updated = s.brainrotOwned.filter((o) => o.slotIdx !== slotIdx)
+    try {
+      window.localStorage.setItem(
+        'komikoyun_br_owned',
+        JSON.stringify(updated)
+      )
+    } catch {}
+    useGameStore.setState({ brainrotOwned: updated })
+    return true
+  },
+  brainrotApplySteal: (slotIdx) => {
+    const s = useGameStore.getState()
+    const owned = s.brainrotOwned.find((o) => o.slotIdx === slotIdx)
+    if (!owned) return false
+    const nowS = Date.now() / 1000
+    if (owned.lockedUntil > nowS) return false // kilitli, çalınamaz
+    const updated = s.brainrotOwned.filter((o) => o.slotIdx !== slotIdx)
+    try {
+      window.localStorage.setItem(
+        'komikoyun_br_owned',
+        JSON.stringify(updated)
+      )
+    } catch {}
+    useGameStore.setState({ brainrotOwned: updated })
+    return true
+  },
+  brainrotReceiveStolen: (defId) => {
+    const s = useGameStore.getState()
+    const maxSlots = 8
+    const used = new Set(s.brainrotOwned.map((o) => o.slotIdx))
+    let slot = -1
+    for (let i = 0; i < maxSlots; i++) if (!used.has(i)) { slot = i; break }
+    if (slot < 0) return false
+    const newOwned = [
+      ...s.brainrotOwned,
+      {
+        id: `o${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        defId,
+        slotIdx: slot,
+        lockedUntil: 0,
+      },
+    ]
+    try {
+      window.localStorage.setItem(
+        'komikoyun_br_owned',
+        JSON.stringify(newOwned)
+      )
+    } catch {}
+    useGameStore.setState({ brainrotOwned: newOwned })
     return true
   },
   brainrotReset: () => {

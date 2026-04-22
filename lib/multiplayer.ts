@@ -65,14 +65,75 @@ type ActionMsg = {
   action: string
   target?: string
 }
-type ServerMsg = WelcomeMsg | StatesMsg | JoinedMsg | LeftMsg | LeaderboardMsg | HitYouMsg | ActionMsg
+export type OwnedSlot = {
+  id: string
+  defId: string
+  slotIdx: number
+  lockedUntil: number
+}
+export type RemoteBrainrotState = {
+  id: string
+  nickname: string
+  cash: number
+  owned: OwnedSlot[]
+}
+type BrStatesMsg = {
+  type: 'br_states'
+  players: RemoteBrainrotState[]
+}
+type BrStolenMsg = {
+  type: 'br_stolen'
+  thiefId: string
+  thiefName: string
+  defId: string
+  slotIdx: number
+}
+type BrReceivedMsg = {
+  type: 'br_received'
+  victimId: string
+  victimName: string
+  defId: string
+}
+type ServerMsg =
+  | WelcomeMsg
+  | StatesMsg
+  | JoinedMsg
+  | LeftMsg
+  | LeaderboardMsg
+  | HitYouMsg
+  | ActionMsg
+  | BrStatesMsg
+  | BrStolenMsg
+  | BrReceivedMsg
 
 const remotes = new Map<string, RemotePlayer>()
 let myId: string | null = null
 let connected = false
 let socket: PartySocket | null = null
 let leaderboard: LeaderboardEntry[] = []
+const remoteBrainrots = new Map<string, RemoteBrainrotState>()
 const subscribers = new Set<() => void>()
+
+// Brainrot stealing event handlers (UI tarafından register edilir)
+type BrStolenHandler = (msg: BrStolenMsg) => void
+type BrReceivedHandler = (msg: BrReceivedMsg) => void
+let brStolenHandler: BrStolenHandler | null = null
+let brReceivedHandler: BrReceivedHandler | null = null
+export function registerBrainrotHandlers(
+  onStolen: BrStolenHandler,
+  onReceived: BrReceivedHandler
+) {
+  brStolenHandler = onStolen
+  brReceivedHandler = onReceived
+}
+export function unregisterBrainrotHandlers() {
+  brStolenHandler = null
+  brReceivedHandler = null
+}
+
+export function getRemoteBrainrots(): RemoteBrainrotState[] {
+  return Array.from(remoteBrainrots.values()).filter((p) => p.id !== myId)
+}
 
 function notify() {
   subscribers.forEach((fn) => fn())
@@ -213,6 +274,14 @@ export function connect(
             msg.fromId
           )
         }
+      } else if (msg.type === 'br_states') {
+        remoteBrainrots.clear()
+        msg.players.forEach((p) => remoteBrainrots.set(p.id, p))
+        notify()
+      } else if (msg.type === 'br_stolen') {
+        if (brStolenHandler) brStolenHandler(msg)
+      } else if (msg.type === 'br_received') {
+        if (brReceivedHandler) brReceivedHandler(msg)
       }
     })
   } catch {
@@ -280,5 +349,31 @@ export function sendAction(action: 'hit' | 'weapon' | 'potion', target?: string)
   if (!socket || !connected) return
   try {
     socket.send(JSON.stringify({ type: 'action', action, target }))
+  } catch {}
+}
+
+let lastBrSendT = 0
+export function sendBrainrotState(cash: number, owned: OwnedSlot[]) {
+  if (!socket || !connected) return
+  const now = performance.now()
+  if (now - lastBrSendT < 1000) return // saniyede 1 kez yeter
+  lastBrSendT = now
+  try {
+    socket.send(
+      JSON.stringify({
+        type: 'br_state',
+        cash: Math.floor(cash),
+        owned: owned.slice(0, 8),
+      })
+    )
+  } catch {}
+}
+
+export function sendBrainrotSteal(victimId: string, slotIdx: number) {
+  if (!socket || !connected) return
+  try {
+    socket.send(
+      JSON.stringify({ type: 'br_steal', victimId, slotIdx })
+    )
   } catch {}
 }

@@ -1,7 +1,14 @@
 // PartyKit server — komikoyun multiplayer
-// Features: player sync, leaderboard (top 5 by score), attack relay
+// Features: player sync, leaderboard, attack relay, brainrot game state + stealing
 
 import type * as Party from 'partykit/server'
+
+type OwnedSlot = {
+  id: string
+  defId: string
+  slotIdx: number
+  lockedUntil: number // unix seconds
+}
 
 type PlayerState = {
   id: string
@@ -20,6 +27,9 @@ type PlayerState = {
   gender: string
   hairColor: string
   lastSeen: number
+  // Brainrot game state
+  brCash: number
+  brOwned: OwnedSlot[]
 }
 
 type ClientMessage =
@@ -48,8 +58,17 @@ type ClientMessage =
       gender?: string
       hairColor?: string
     }
-  | { type: 'hit'; targetId: string; damage: number; knockX: number; knockY: number; knockZ: number }
+  | {
+      type: 'hit'
+      targetId: string
+      damage: number
+      knockX: number
+      knockY: number
+      knockZ: number
+    }
   | { type: 'action'; action: string; target?: string }
+  | { type: 'br_state'; cash: number; owned: OwnedSlot[] }
+  | { type: 'br_steal'; victimId: string; slotIdx: number }
 
 type ServerMessage =
   | { type: 'welcome'; yourId: string; players: PlayerState[] }
@@ -87,11 +106,29 @@ type ServerMessage =
       knockZ: number
     }
   | { type: 'action'; fromId: string; action: string; target?: string }
+  | {
+      type: 'br_states'
+      players: { id: string; nickname: string; cash: number; owned: OwnedSlot[] }[]
+    }
+  | {
+      type: 'br_stolen'
+      thiefId: string
+      thiefName: string
+      defId: string
+      slotIdx: number
+    }
+  | {
+      type: 'br_received'
+      victimId: string
+      victimName: string
+      defId: string
+    }
 
 export default class KomikOyunParty implements Party.Server {
   players = new Map<string, PlayerState>()
   broadcastInterval: ReturnType<typeof setInterval> | null = null
   leaderboardInterval: ReturnType<typeof setInterval> | null = null
+  brainrotInterval: ReturnType<typeof setInterval> | null = null
 
   constructor(readonly room: Party.Room) {}
 
@@ -102,6 +139,9 @@ export default class KomikOyunParty implements Party.Server {
     this.leaderboardInterval = setInterval(() => {
       this.broadcastLeaderboard()
     }, 2000)
+    this.brainrotInterval = setInterval(() => {
+      this.broadcastBrainrotStates()
+    }, 1500)
   }
 
   onConnect(conn: Party.Connection) {
@@ -122,6 +162,8 @@ export default class KomikOyunParty implements Party.Server {
       gender: 'boy',
       hairColor: '#3d2817',
       lastSeen: Date.now(),
+      brCash: 100,
+      brOwned: [],
     }
     this.players.set(conn.id, player)
 
@@ -131,8 +173,9 @@ export default class KomikOyunParty implements Party.Server {
       players: Array.from(this.players.values()),
     }
     conn.send(JSON.stringify(msg))
-    // Immediately send leaderboard
+    // Immediately send leaderboard + brainrot snapshot
     conn.send(JSON.stringify(this.buildLeaderboard()))
+    conn.send(JSON.stringify(this.buildBrainrotStates()))
   }
 
   onMessage(message: string, sender: Party.Connection) {
@@ -176,7 +219,6 @@ export default class KomikOyunParty implements Party.Server {
       if (parsed.hairColor) player.hairColor = parsed.hairColor
       player.lastSeen = Date.now()
     } else if (parsed.type === 'hit') {
-      // Relay hit to the target
       const targetConn = this.room.getConnection(parsed.targetId)
       if (targetConn) {
         const hitMsg: ServerMessage = {
@@ -199,6 +241,73 @@ export default class KomikOyunParty implements Party.Server {
         } satisfies ServerMessage),
         [sender.id]
       )
+    } else if (parsed.type === 'br_state') {
+      // Client kendi brainrot state'ini bildiriyor
+      player.brCash = Math.max(0, Math.floor(parsed.cash))
+      player.brOwned = Array.isArray(parsed.owned)
+        ? parsed.owned.slice(0, 8).map((o) => ({
+            id: String(o.id),
+            defId: String(o.defId),
+            slotIdx: Math.max(0, Math.min(7, o.slotIdx | 0)),
+            lockedUntil: Number(o.lockedUntil) || 0,
+          }))
+        : []
+    } else if (parsed.type === 'br_steal') {
+      // Steal isteği — server validate eder, her iki tarafa bildirir
+      const victim = this.players.get(parsed.victimId)
+      if (!victim || victim.id === sender.id) return
+      const slot = victim.brOwned.find((o) => o.slotIdx === parsed.slotIdx)
+      if (!slot) return
+      const nowS = Date.now() / 1000
+      if (slot.lockedUntil > nowS) return // kilitli, çalınamaz
+      const stolenDefId = slot.defId
+
+      // Server-side state update (optimistik)
+      victim.brOwned = victim.brOwned.filter(
+        (o) => o.slotIdx !== parsed.slotIdx
+      )
+      // Hırsıza boş slot bul
+      const usedSlots = new Set(player.brOwned.map((o) => o.slotIdx))
+      let freeSlot = -1
+      for (let i = 0; i < 8; i++) {
+        if (!usedSlots.has(i)) {
+          freeSlot = i
+          break
+        }
+      }
+      if (freeSlot >= 0) {
+        player.brOwned.push({
+          id: `o${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          defId: stolenDefId,
+          slotIdx: freeSlot,
+          lockedUntil: 0,
+        })
+      }
+
+      // Notify thief
+      sender.send(
+        JSON.stringify({
+          type: 'br_received',
+          victimId: victim.id,
+          victimName: victim.nickname,
+          defId: stolenDefId,
+        } satisfies ServerMessage)
+      )
+      // Notify victim
+      const victimConn = this.room.getConnection(victim.id)
+      if (victimConn) {
+        victimConn.send(
+          JSON.stringify({
+            type: 'br_stolen',
+            thiefId: sender.id,
+            thiefName: player.nickname,
+            defId: stolenDefId,
+            slotIdx: parsed.slotIdx,
+          } satisfies ServerMessage)
+        )
+      }
+      // Anında state broadcast
+      this.broadcastBrainrotStates()
     }
   }
 
@@ -247,5 +356,22 @@ export default class KomikOyunParty implements Party.Server {
   broadcastLeaderboard() {
     if (this.players.size < 1) return
     this.room.broadcast(JSON.stringify(this.buildLeaderboard()))
+  }
+
+  buildBrainrotStates(): ServerMessage {
+    return {
+      type: 'br_states',
+      players: Array.from(this.players.values()).map((p) => ({
+        id: p.id,
+        nickname: p.nickname,
+        cash: p.brCash,
+        owned: p.brOwned,
+      })),
+    }
+  }
+
+  broadcastBrainrotStates() {
+    if (this.players.size < 1) return
+    this.room.broadcast(JSON.stringify(this.buildBrainrotStates()))
   }
 }
