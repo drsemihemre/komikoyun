@@ -28,7 +28,7 @@ import RemotePlayers from './RemotePlayers'
 import Shop from './Shop'
 import Challenges from './Challenges'
 import PlacedBlocks from './PlacedBlocks'
-import SurprisePortal from './SurprisePortal'
+import BrainrotGame from './BrainrotGame'
 import { useGameStore } from '@/lib/store'
 
 export default function World() {
@@ -61,7 +61,7 @@ export default function World() {
       <Shop kind="upgrade" position={[9, 0, 6]} />
       <Challenges />
       <PlacedBlocks />
-      <SurprisePortal />
+      <BrainrotGame />
       <SpiralStairs position={[-16, 0, -4]} height={16} />
       <HitParticles />
       <RemotePlayers />

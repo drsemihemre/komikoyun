@@ -45,6 +45,15 @@ type GameState = {
     z: number
     material: string
   }>
+  // Brainrot game
+  brainrotCash: number
+  brainrotOwned: Array<{
+    id: string
+    defId: string
+    slotIdx: number
+    lockedUntil: number
+  }>
+  brainrotCarrying: string | null // defId carrying'de
   // Potion-driven effects
   scale: number
   speedMult: number
@@ -88,6 +97,10 @@ type GameState = {
   placeBlockAt: (x: number, y: number, z: number) => void
   removeBlockAt: (x: number, y: number, z: number) => void
   clearBlocks: () => void
+  brainrotBuy: (defId: string, price: number) => boolean
+  brainrotEarn: (amount: number) => void
+  brainrotLockSlot: (slotIdx: number) => boolean
+  brainrotReset: () => void
   drinkPotion: (p: PotionType) => void
   resetPotions: () => void
   incrementHitCount: () => void
@@ -167,6 +180,30 @@ export const useGameStore = create<GameState>((set) => ({
           }
         })()
       : [],
+  brainrotCash:
+    typeof window !== 'undefined'
+      ? (() => {
+          try {
+            return Number(
+              window.localStorage.getItem('komikoyun_br_cash') ?? '100'
+            )
+          } catch {
+            return 100
+          }
+        })()
+      : 100,
+  brainrotOwned:
+    typeof window !== 'undefined'
+      ? (() => {
+          try {
+            const raw = window.localStorage.getItem('komikoyun_br_owned')
+            return raw ? JSON.parse(raw) : []
+          } catch {
+            return []
+          }
+        })()
+      : [],
+  brainrotCarrying: null,
   scale: 1,
   speedMult: 1,
   potionHits: { grow: 0, shrink: 0, speed: 0, slow: 0 },
@@ -326,6 +363,78 @@ export const useGameStore = create<GameState>((set) => ({
       } catch {}
       return { placedBlocks: [] }
     }),
+
+  brainrotBuy: (defId, price) => {
+    const s = useGameStore.getState()
+    if (s.brainrotCash < price) return false
+    // İlk boş slot
+    const maxSlots = 8
+    const used = new Set(s.brainrotOwned.map((o) => o.slotIdx))
+    let slot = -1
+    for (let i = 0; i < maxSlots; i++) if (!used.has(i)) { slot = i; break }
+    if (slot < 0) return false
+    const newCash = s.brainrotCash - price
+    const newOwned = [
+      ...s.brainrotOwned,
+      {
+        id: `o${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        defId,
+        slotIdx: slot,
+        lockedUntil: 0,
+      },
+    ]
+    try {
+      window.localStorage.setItem('komikoyun_br_cash', String(newCash))
+      window.localStorage.setItem(
+        'komikoyun_br_owned',
+        JSON.stringify(newOwned)
+      )
+    } catch {}
+    useGameStore.setState({
+      brainrotCash: newCash,
+      brainrotOwned: newOwned,
+    })
+    return true
+  },
+  brainrotEarn: (amount) =>
+    set((s) => {
+      const newCash = s.brainrotCash + amount
+      try {
+        window.localStorage.setItem('komikoyun_br_cash', String(Math.floor(newCash)))
+      } catch {}
+      return { brainrotCash: newCash }
+    }),
+  brainrotLockSlot: (slotIdx) => {
+    const s = useGameStore.getState()
+    const owned = s.brainrotOwned.find((o) => o.slotIdx === slotIdx)
+    if (!owned) return false
+    const LOCK_COST = 50
+    if (s.brainrotCash < LOCK_COST) return false
+    const nowS = Date.now() / 1000
+    const updated = s.brainrotOwned.map((o) =>
+      o.slotIdx === slotIdx ? { ...o, lockedUntil: nowS + 60 } : o
+    )
+    const newCash = s.brainrotCash - LOCK_COST
+    try {
+      window.localStorage.setItem('komikoyun_br_cash', String(newCash))
+      window.localStorage.setItem(
+        'komikoyun_br_owned',
+        JSON.stringify(updated)
+      )
+    } catch {}
+    useGameStore.setState({
+      brainrotCash: newCash,
+      brainrotOwned: updated,
+    })
+    return true
+  },
+  brainrotReset: () => {
+    try {
+      window.localStorage.removeItem('komikoyun_br_cash')
+      window.localStorage.removeItem('komikoyun_br_owned')
+    } catch {}
+    set({ brainrotCash: 100, brainrotOwned: [], brainrotCarrying: null })
+  },
 
   drinkPotion: (p) =>
     set((state) => {
