@@ -5,7 +5,13 @@ import { Physics } from '@react-three/rapier'
 import { KeyboardControls, PerformanceMonitor } from '@react-three/drei'
 import { useEffect, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
-import type { DirectionalLight, AmbientLight } from 'three'
+import {
+  ACESFilmicToneMapping,
+  PCFSoftShadowMap,
+  SRGBColorSpace,
+  type DirectionalLight,
+  type AmbientLight,
+} from 'three'
 import DayNightCycle from './DayNightCycle'
 import Player from './Player'
 import World from './World'
@@ -103,10 +109,17 @@ export default function Game() {
     <div className="relative h-screen w-screen select-none overflow-hidden">
       <KeyboardControls map={controlKeys}>
         <Canvas
-          shadows
+          shadows={{ type: PCFSoftShadowMap, enabled: true }}
           camera={{ position: [0, 8, 16], fov: 60 }}
           dpr={dpr}
-          gl={{ antialias: true, powerPreference: 'high-performance' }}
+          gl={{
+            antialias: true,
+            powerPreference: 'high-performance',
+            toneMapping: ACESFilmicToneMapping,
+            toneMappingExposure: 1.15,
+            outputColorSpace: SRGBColorSpace,
+            stencil: false,
+          }}
           performance={{ min: 0.5 }}
         >
           <PerformanceMonitor flipflops={3} onFallback={() => setDpr([1, 1])} />
@@ -120,15 +133,25 @@ export default function Game() {
             position={[20, 35, 18]}
             intensity={1.4}
             castShadow
-            shadow-mapSize={mobile ? [512, 512] : [1024, 1024]}
-            shadow-camera-left={-35}
-            shadow-camera-right={35}
-            shadow-camera-top={35}
-            shadow-camera-bottom={-35}
+            shadow-mapSize={mobile ? [1024, 1024] : [2048, 2048]}
+            shadow-camera-left={-40}
+            shadow-camera-right={40}
+            shadow-camera-top={40}
+            shadow-camera-bottom={-40}
             shadow-camera-near={0.1}
-            shadow-camera-far={150}
-            shadow-bias={-0.0005}
+            shadow-camera-far={200}
+            shadow-bias={-0.00025}
+            shadow-normalBias={0.04}
+            shadow-radius={4}
           />
+          {/* İkincil dolgu ışığı — karşı yönden hafif rim lighting (Unreal "fill light") */}
+          <directionalLight
+            position={[-25, 20, -15]}
+            intensity={0.35}
+            color="#b8d4ff"
+          />
+          {/* Gökyüzü hemisphere ışığı — ambient derinliği arttırır */}
+          <hemisphereLight args={['#ffefd5', '#4a5568', 0.4]} />
           <GraphicsFx />
           <Physics gravity={[0, -22, 0]} interpolate paused={physicsPaused}>
             <ShadowFollower lightRef={lightRef} />

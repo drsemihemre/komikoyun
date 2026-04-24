@@ -1,9 +1,9 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { useFrame } from '@react-three/fiber'
+import { useFrame, useThree } from '@react-three/fiber'
 import { Sky, Stars } from '@react-three/drei'
-import type { DirectionalLight, AmbientLight } from 'three'
+import { Color, Fog, type DirectionalLight, type AmbientLight } from 'three'
 
 type Props = {
   dirLightRef: React.RefObject<DirectionalLight | null>
@@ -75,6 +75,16 @@ export default function DayNightCycle({ dirLightRef, ambientRef }: Props) {
   )
   const [gameHour, setGameHour] = useState(() => currentGameHour())
   const lastHour = useRef<number | null>(null)
+  const { scene } = useThree()
+  const fogColor = useRef(new Color('#c2d4e8'))
+
+  // Sahne fog'unu bir kere kur, her frame rengini güncelle
+  useEffect(() => {
+    scene.fog = new Fog(fogColor.current, 80, 380)
+    return () => {
+      scene.fog = null
+    }
+  }, [scene])
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -114,16 +124,29 @@ export default function DayNightCycle({ dirLightRef, ambientRef }: Props) {
       dir.intensity = 0.25
       amb.color.setRGB(0.35, 0.4, 0.6)
       amb.intensity = 0.3
+      fogColor.current.setRGB(0.12, 0.16, 0.28)
     } else if (altitude < 0.2) {
       dir.color.setRGB(1, 0.75, 0.5)
       dir.intensity = daylight * 1.3 + 0.3
       amb.color.setRGB(1, 0.82, 0.7)
       amb.intensity = 0.35 + daylight * 0.5
+      // Gün doğumu / batımı — turuncu sis
+      fogColor.current.setRGB(
+        0.85 + daylight * 0.1,
+        0.6 + daylight * 0.2,
+        0.5 + daylight * 0.3
+      )
     } else {
       dir.color.setRGB(1, 0.98, 0.93)
       dir.intensity = daylight * 1.3 + 0.1
       amb.color.setRGB(1, 1, 1)
       amb.intensity = 0.3 + daylight * 0.6
+      // Gündüz — açık mavi-beyaz atmospheric haze
+      fogColor.current.setRGB(0.76, 0.82, 0.91)
+    }
+    // scene.fog varsa rengini güncelle
+    if (scene.fog && 'color' in scene.fog) {
+      ;(scene.fog as Fog).color.copy(fogColor.current)
     }
   })
 

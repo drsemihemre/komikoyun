@@ -44,26 +44,26 @@ export default function Lake() {
         {isMobile ? (
           <meshStandardMaterial
             color="#4aa3df"
-            roughness={0.3}
-            metalness={0.2}
+            roughness={0.25}
+            metalness={0.6}
             emissive="#1a5e8f"
-            emissiveIntensity={0.15}
+            emissiveIntensity={0.2}
             transparent
-            opacity={0.9}
+            opacity={0.92}
           />
         ) : (
           <MeshReflectorMaterial
-            blur={[300, 80]}
-            resolution={512}
-            mixBlur={1}
-            mixStrength={40}
-            roughness={0.7}
-            depthScale={1}
+            blur={[400, 120]}
+            resolution={1024}
+            mixBlur={1.2}
+            mixStrength={55}
+            roughness={0.35}
+            depthScale={1.2}
             minDepthThreshold={0.4}
-            maxDepthThreshold={1.4}
-            color="#4aa3df"
-            metalness={0.4}
-            mirror={0.6}
+            maxDepthThreshold={1.5}
+            color="#5ab3e8"
+            metalness={0.75}
+            mirror={0.85}
           />
         )}
       </mesh>
