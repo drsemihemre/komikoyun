@@ -97,7 +97,7 @@ type GameState = {
   placeBlockAt: (x: number, y: number, z: number) => void
   removeBlockAt: (x: number, y: number, z: number) => void
   clearBlocks: () => void
-  brainrotBuy: (defId: string, price: number) => boolean
+  brainrotBuy: (defId: string, price: number) => number // -1 fail, else slotIdx
   brainrotEarn: (amount: number) => void
   brainrotLockSlot: (slotIdx: number) => boolean
   brainrotSell: (slotIdx: number) => boolean
@@ -369,13 +369,13 @@ export const useGameStore = create<GameState>((set) => ({
 
   brainrotBuy: (defId, price) => {
     const s = useGameStore.getState()
-    if (s.brainrotCash < price) return false
+    if (s.brainrotCash < price) return -1
     // İlk boş slot
     const maxSlots = 8
     const used = new Set(s.brainrotOwned.map((o) => o.slotIdx))
     let slot = -1
     for (let i = 0; i < maxSlots; i++) if (!used.has(i)) { slot = i; break }
-    if (slot < 0) return false
+    if (slot < 0) return -1
     const newCash = s.brainrotCash - price
     const newOwned = [
       ...s.brainrotOwned,
@@ -397,7 +397,7 @@ export const useGameStore = create<GameState>((set) => ({
       brainrotCash: newCash,
       brainrotOwned: newOwned,
     })
-    return true
+    return slot
   },
   brainrotEarn: (amount) =>
     set((s) => {

@@ -8,7 +8,6 @@ import type { Group, Mesh } from 'three'
 import { getPlayerHandle } from '@/lib/playerHandle'
 import { useGameStore } from '@/lib/store'
 import {
-  BRAINROTS,
   RARITY_COLORS,
   RARITY_LABELS,
   getBrainrotDef,
@@ -28,14 +27,16 @@ import {
   getMyId,
   type RemoteBrainrotState,
 } from '@/lib/multiplayer'
+import { loadNickname } from '@/lib/nickname'
 
-// ─────────────────────────────────────────────────────────────
-// STEAL A BRAINROT — Tam oyun
-//   Ana dünyada mor portal → uzak bir ada (ZONE_CENTER)
-//   Klasik mod: konveyordan satın al, slotta pasif gelir üret, sat, kilitle
-//   Tsunami mod: dalgadan kaç, HP kaybet
-//   Multiplayer: diğer oyuncuların slotlarını gör, kilitli değilse çal
-// ─────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+//   STEAL A BRAINROT — Tam oyun
+//   - Merkezde konveyor + mod tabelalar
+//   - Her oyuncunun kendi EV'i (nickname üstünde)
+//   - Satın alınan brainrot konveyordan çıkıp yürüyerek eve gelir
+//   - Z tuşu (mobile'de SAT butonu) ile slot satılır (%50 fiyat)
+//   - Başkasının kilitsiz slot'unda 3sn dur → çal
+// ═══════════════════════════════════════════════════════════════
 
 const MAIN_PORTAL: [number, number, number] = [0, 1.5, 60]
 const ZONE_CENTER: [number, number, number] = [400, 150, 400]
@@ -45,25 +46,44 @@ const CONVEYOR_END = 18
 const CONVEYOR_TRAVEL_TIME = 22
 const SPAWN_INTERVAL = 4.5
 
-// 8 base slot konumu — platformun çevresine dizili
-const BASE_SLOTS: [number, number, number][] = [
-  [-14, 0, -10],
-  [-7, 0, -12],
-  [0, 0, -13],
-  [7, 0, -12],
-  [14, 0, -10],
-  [-14, 0, 10],
-  [14, 0, 10],
-  [0, 0, 13],
+// Ev içinde slot konumları (ev merkezine relatif)
+const HOME_SLOTS: [number, number, number][] = [
+  [-5, 0, -3],
+  [-2.5, 0, -4],
+  [0, 0, -4.5],
+  [2.5, 0, -4],
+  [5, 0, -3],
+  [-5, 0, 3],
+  [0, 0, 4.5],
+  [5, 0, 3],
 ]
 
-// Remote players için ayrı base'ler (her 50 birim yana bir base kolonu)
-const REMOTE_BASE_OFFSET_X = 80
+const HOME_SIZE = 7 // yarı-genişlik (toplam 14x14 platform)
+
+// Local ev konumu (merkez konveyorun güneyi)
+const LOCAL_HOME: [number, number, number] = [0, 0, -28]
+
+// Remote ev konumları — merkez etrafında halka
+function remoteHomeOffset(index: number): [number, number] {
+  // 6 çevre + 1 local (merkez). Halka: 60 birim yarıçap
+  const angle = (index / 6) * Math.PI * 2 + Math.PI / 6
+  const r = 45
+  return [Math.cos(angle) * r, Math.sin(angle) * r]
+}
 
 type BeltItem = {
   id: string
   defId: string
   spawnedAt: number
+}
+
+type WalkingItem = {
+  id: string
+  defId: string
+  from: [number, number, number]
+  to: [number, number, number]
+  startT: number
+  duration: number
 }
 
 export default function BrainrotGame() {
@@ -146,21 +166,26 @@ function Portal({
   )
 }
 
+// ═══════════════════════════════════════════════════════════════
+// MAIN GAME ZONE
+// ═══════════════════════════════════════════════════════════════
 function GameZone() {
   const [cx, cy, cz] = ZONE_CENTER
   const [mode, setMode] = useState<'classic' | 'tsunami'>('classic')
   const [belt, setBelt] = useState<BeltItem[]>([])
+  const [walking, setWalking] = useState<WalkingItem[]>([])
   const [banner, setBanner] = useState<{ text: string; color: string } | null>(
     null
   )
   const lastSpawnRef = useRef(0)
   const earnTickRef = useRef(0)
   const syncTickRef = useRef(0)
+  const nickname = useMemo(() => loadNickname() || 'Sen', [])
 
   const { brainrotCash, brainrotOwned, brainrotBuy, brainrotEarn } =
     useGameStore()
+  const isMobile = useGameStore((s) => s.isMobile)
 
-  // Remote brainrots (başkalarının base'leri)
   const [, setTick] = useState(0)
   useEffect(() => {
     const unsub = subscribeMP(() => setTick((t) => t + 1))
@@ -169,7 +194,7 @@ function GameZone() {
   const remoteBases = getRemoteBrainrots()
   const myId = getMyId()
 
-  // Stealing event notifications
+  // Stealing notifications
   useEffect(() => {
     registerBrainrotHandlers(
       (stolen) => {
@@ -196,16 +221,59 @@ function GameZone() {
     return () => unregisterBrainrotHandlers()
   }, [])
 
-  // Spawn + income + multiplayer sync loop
+  // ───── Z TUŞU: Local slot yakınında → sat ─────
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'z' && e.key !== 'Z') return
+      if (e.repeat) return
+      const state = useGameStore.getState()
+      if (!state.gameStarted || state.paused) return
+      const player = getPlayerHandle()
+      const pp = player?.getPos()
+      if (!pp) return
+      // Her owned slot için distance check
+      for (const owned of state.brainrotOwned) {
+        const slotLocal = HOME_SLOTS[owned.slotIdx]
+        if (!slotLocal) continue
+        const worldX = cx + LOCAL_HOME[0] + slotLocal[0]
+        const worldZ = cz + LOCAL_HOME[2] + slotLocal[2]
+        const dist = Math.hypot(pp.x - worldX, pp.z - worldZ)
+        if (dist < 2.5) {
+          const def = getBrainrotDef(owned.defId)
+          if (!def) return
+          const gain = sellPriceFor(def)
+          if (state.brainrotSell(owned.slotIdx)) {
+            state.brainrotEarn(gain)
+            playPotion('grow')
+            setBanner({
+              text: `💰 ${def.name} satıldı +${gain.toLocaleString('tr')}`,
+              color: '#16a34a',
+            })
+            setTimeout(() => setBanner(null), 2000)
+          }
+          return
+        }
+      }
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [cx, cz])
+
+  // Spawn + income + server sync loop
   useFrame((state) => {
     const t = state.clock.elapsedTime
+
+    // Konveyor spawn (sadece classic modda)
     if (mode === 'classic' && t - lastSpawnRef.current > SPAWN_INTERVAL) {
       lastSpawnRef.current = t
       const def = randomBrainrot()
-      setBelt((prev) => [
-        ...prev.slice(-9),
-        { id: `b${Date.now()}_${Math.random()}`, defId: def.id, spawnedAt: t },
-      ])
+      if (def) {
+        setBelt((prev) => [
+          ...prev.slice(-9),
+          { id: `b${Date.now()}_${Math.random()}`, defId: def.id, spawnedAt: t },
+        ])
+      }
+      // def null ise konveyor boş geçti (%15)
     }
 
     // Pasif gelir
@@ -218,7 +286,7 @@ function GameZone() {
       if (totalIncome > 0) brainrotEarn(totalIncome)
     }
 
-    // Server sync (her 1.5 sn)
+    // Server sync
     if (t - syncTickRef.current > 1.5) {
       syncTickRef.current = t
       const { brainrotCash: cash, brainrotOwned: owned } =
@@ -226,45 +294,79 @@ function GameZone() {
       sendBrainrotState(cash, owned)
     }
 
-    // Eski belt item'larını temizle
+    // Eski belt ve walking item'ları temizle
     setBelt((prev) =>
       prev.filter((it) => t - it.spawnedAt < CONVEYOR_TRAVEL_TIME)
     )
+    setWalking((prev) => prev.filter((w) => t - w.startT < w.duration + 0.5))
   })
 
-  // Remote player'ları sağa/sola yayılan kolonlar halinde yerleştir
+  // Remote player'ları halka düzeninde yerleştir
   const remoteLayout = useMemo(() => {
-    return remoteBases
-      .filter((r) => r.id !== myId && r.owned.length > 0)
+    const active = remoteBases
+      .filter((r) => r.id !== myId)
       .slice(0, 6)
-      .map((r, idx) => {
-        // Her remote base yan yana: -2..-1..1..2 gibi sıralı
-        const side = idx % 2 === 0 ? -1 : 1
-        const step = Math.floor(idx / 2) + 1
-        const offsetX = side * REMOTE_BASE_OFFSET_X * step
-        return { ...r, offsetX }
-      })
+    return active.map((r, idx) => {
+      const [ox, oz] = remoteHomeOffset(idx)
+      return { ...r, offsetX: ox, offsetZ: oz }
+    })
   }, [remoteBases, myId])
+
+  // Konveyordan satın alma handler
+  const handleBuy = (
+    defId: string,
+    price: number,
+    fromX: number,
+    fromZ: number
+  ) => {
+    const slotIdx = brainrotBuy(defId, price)
+    if (slotIdx < 0) return false
+    // Walking animation
+    const slotLocal = HOME_SLOTS[slotIdx]
+    if (slotLocal) {
+      const toX = LOCAL_HOME[0] + slotLocal[0]
+      const toZ = LOCAL_HOME[2] + slotLocal[2]
+      const id = `w${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+      setWalking((prev) => [
+        ...prev,
+        {
+          id,
+          defId,
+          from: [fromX, 0.2, fromZ],
+          to: [toX, 0.2, toZ],
+          startT: performance.now() / 1000,
+          duration: 2.8,
+        },
+      ])
+    }
+    playPotion('grow')
+    return true
+  }
 
   return (
     <group position={[cx, cy, cz]}>
-      {/* Ana platform */}
+      {/* Ana büyük platform — tüm evler bunun üzerinde */}
       <RigidBody type="fixed" colliders={false}>
-        <CuboidCollider args={[30, 0.5, 25]} position={[0, -0.5, 0]} />
-        <mesh position={[0, -0.5, 0]} castShadow receiveShadow>
-          <boxGeometry args={[60, 1, 50]} />
-          <meshToonMaterial color="#ff77ee" />
+        <CuboidCollider args={[60, 0.5, 60]} position={[0, -0.5, 0]} />
+        <mesh position={[0, -0.5, 0]} receiveShadow>
+          <boxGeometry args={[120, 1, 120]} />
+          <meshStandardMaterial color="#ff77ee" roughness={0.8} />
         </mesh>
-        <mesh position={[0, -2, 0]} castShadow>
-          <cylinderGeometry args={[25, 22, 3, 32]} />
-          <meshToonMaterial color="#a84ed0" />
+        {/* Alt süslü disk */}
+        <mesh position={[0, -2, 0]}>
+          <cylinderGeometry args={[55, 50, 3, 40]} />
+          <meshStandardMaterial color="#a84ed0" roughness={0.7} />
         </mesh>
       </RigidBody>
 
       {/* Başlık */}
       <mesh position={[0, 6, 20]} castShadow>
         <boxGeometry args={[22, 3.8, 0.4]} />
-        <meshToonMaterial color="#ff006e" />
+        <meshStandardMaterial
+          color="#ff006e"
+          emissive="#ff006e"
+          emissiveIntensity={0.3}
+        />
       </mesh>
       <Html position={[0, 6, 20.25]} center distanceFactor={18} zIndexRange={[10, 0]}>
         <div className="pointer-events-none whitespace-nowrap px-2 text-4xl font-black text-white drop-shadow-[3px_3px_0_#000]">
@@ -291,26 +393,43 @@ function GameZone() {
       {/* Konveyor zemini */}
       <mesh position={[0, 0.1, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[44, 4]} />
-        <meshToonMaterial color="#1f2937" />
+        <meshStandardMaterial color="#1f2937" roughness={0.9} />
       </mesh>
       {Array.from({ length: 10 }).map((_, i) => {
         const x = -20 + i * 4.4
         return (
           <mesh key={`cline${i}`} position={[x, 0.12, 0]} rotation={[-Math.PI / 2, 0, 0]}>
             <planeGeometry args={[1.5, 0.3]} />
-            <meshBasicMaterial color="#facc15" />
+            <meshStandardMaterial
+              color="#facc15"
+              emissive="#facc15"
+              emissiveIntensity={0.3}
+            />
           </mesh>
         )
       })}
 
-      {/* Base slotları */}
-      {BASE_SLOTS.map((s, i) => (
-        <BaseSlot key={i} slotIdx={i} position={s} />
-      ))}
+      {/* ═══ LOCAL HOME (benim evim) ═══ */}
+      <PlayerHome
+        position={LOCAL_HOME}
+        nickname={nickname}
+        isLocal
+        owned={brainrotOwned}
+        isMobile={isMobile}
+      />
 
-      {/* Shop alanı — SAT tabelası */}
-      <SellZone position={[-22, 0, 16]} />
-      <SellZone position={[22, 0, 16]} />
+      {/* ═══ REMOTE HOMES ═══ */}
+      {remoteLayout.map((r) => (
+        <PlayerHome
+          key={r.id}
+          position={[r.offsetX, 0, r.offsetZ]}
+          nickname={r.nickname}
+          isLocal={false}
+          owned={r.owned}
+          victimId={r.id}
+          isMobile={isMobile}
+        />
+      ))}
 
       {/* Konveyordaki brainrotlar */}
       {mode === 'classic' &&
@@ -318,26 +437,30 @@ function GameZone() {
           <BeltBrainrot
             key={item.id}
             item={item}
-            onBuy={(defId, price) => {
-              if (brainrotBuy(defId, price)) {
+            onBuy={(defId, price, bx, bz) => {
+              if (handleBuy(defId, price, bx, bz)) {
                 setBelt((prev) => prev.filter((b) => b.id !== item.id))
-                playPotion('grow')
               }
             }}
           />
         ))}
 
-      {/* Tsunami dalgası */}
+      {/* Yürüyen karakterler */}
+      {walking.map((w) => (
+        <WalkingBrainrot key={w.id} item={w} />
+      ))}
+
+      {/* Tsunami */}
       {mode === 'tsunami' && <TsunamiWave />}
 
       {/* Cash HUD */}
       <Html position={[0, 4, 18]} center distanceFactor={10} zIndexRange={[10, 0]}>
         <div className="pointer-events-none flex items-center gap-2 rounded-full bg-yellow-400 px-4 py-2 text-lg font-black text-black shadow-xl">
-          💰 {Math.floor(brainrotCash)}
+          💰 {Math.floor(brainrotCash).toLocaleString('tr')}
         </div>
       </Html>
 
-      {/* Stealing banner */}
+      {/* Banner */}
       {banner && (
         <Html position={[0, 10, 15]} center distanceFactor={14} zIndexRange={[20, 0]}>
           <div
@@ -349,14 +472,333 @@ function GameZone() {
         </Html>
       )}
 
-      {/* REMOTE PLAYER BASE'LERİ */}
-      {remoteLayout.map((r) => (
-        <RemotePlayerBase key={r.id} remote={r} />
-      ))}
+      {/* Klavye yardım etiketi */}
+      {!isMobile && (
+        <Html position={[0, 2, -12]} center distanceFactor={16} zIndexRange={[10, 0]}>
+          <div className="pointer-events-none whitespace-nowrap rounded-lg bg-black/70 px-3 py-1.5 text-xs font-bold text-white shadow">
+            💡 Slot üzerine gel + <kbd className="rounded bg-white/20 px-1">Z</kbd> = SAT (alım fiyatının %50'si)
+          </div>
+        </Html>
+      )}
     </group>
   )
 }
 
+// ═══════════════════════════════════════════════════════════════
+// PLAYER HOME — her oyuncunun kendi ev'i
+// ═══════════════════════════════════════════════════════════════
+function PlayerHome({
+  position,
+  nickname,
+  isLocal,
+  owned,
+  victimId,
+  isMobile,
+}: {
+  position: [number, number, number]
+  nickname: string
+  isLocal: boolean
+  owned: Array<{ defId: string; slotIdx: number; lockedUntil: number }>
+  victimId?: string
+  isMobile: boolean
+}) {
+  const platformColor = isLocal ? '#fef3c7' : '#e2e8f0'
+  const fenceColor = isLocal ? '#f97316' : '#64748b'
+  const roofColor = isLocal ? '#dc2626' : '#475569'
+
+  return (
+    <group position={position}>
+      {/* Platform */}
+      <RigidBody type="fixed" colliders={false}>
+        <CuboidCollider
+          args={[HOME_SIZE, 0.3, HOME_SIZE]}
+          position={[0, 0.1, 0]}
+        />
+        <mesh position={[0, 0.1, 0]} receiveShadow>
+          <boxGeometry args={[HOME_SIZE * 2, 0.2, HOME_SIZE * 2]} />
+          <meshStandardMaterial color={platformColor} roughness={0.75} />
+        </mesh>
+      </RigidBody>
+
+      {/* 4 köşe direk */}
+      {[
+        [-HOME_SIZE + 0.3, -HOME_SIZE + 0.3],
+        [HOME_SIZE - 0.3, -HOME_SIZE + 0.3],
+        [-HOME_SIZE + 0.3, HOME_SIZE - 0.3],
+        [HOME_SIZE - 0.3, HOME_SIZE - 0.3],
+      ].map(([x, z], i) => (
+        <mesh key={`post${i}`} position={[x, 2, z]} castShadow>
+          <cylinderGeometry args={[0.15, 0.18, 4, 8]} />
+          <meshStandardMaterial color={fenceColor} roughness={0.6} />
+        </mesh>
+      ))}
+
+      {/* Çit — 4 tarafa düşük duvar */}
+      <mesh position={[0, 0.7, -HOME_SIZE + 0.3]} receiveShadow>
+        <boxGeometry args={[HOME_SIZE * 2 - 0.6, 0.3, 0.15]} />
+        <meshStandardMaterial color={fenceColor} roughness={0.5} />
+      </mesh>
+      <mesh position={[0, 0.7, HOME_SIZE - 0.3]} receiveShadow>
+        <boxGeometry args={[HOME_SIZE * 2 - 0.6, 0.3, 0.15]} />
+        <meshStandardMaterial color={fenceColor} roughness={0.5} />
+      </mesh>
+      <mesh position={[-HOME_SIZE + 0.3, 0.7, 0]} receiveShadow>
+        <boxGeometry args={[0.15, 0.3, HOME_SIZE * 2 - 0.6]} />
+        <meshStandardMaterial color={fenceColor} roughness={0.5} />
+      </mesh>
+      <mesh position={[HOME_SIZE - 0.3, 0.7, 0]} receiveShadow>
+        <boxGeometry args={[0.15, 0.3, HOME_SIZE * 2 - 0.6]} />
+        <meshStandardMaterial color={fenceColor} roughness={0.5} />
+      </mesh>
+
+      {/* Çatı kasası — üst kolonlar arasına yatay kiriş */}
+      <mesh position={[0, 4, -HOME_SIZE + 0.3]}>
+        <boxGeometry args={[HOME_SIZE * 2 - 0.6, 0.15, 0.12]} />
+        <meshStandardMaterial color={roofColor} />
+      </mesh>
+      <mesh position={[0, 4, HOME_SIZE - 0.3]}>
+        <boxGeometry args={[HOME_SIZE * 2 - 0.6, 0.15, 0.12]} />
+        <meshStandardMaterial color={roofColor} />
+      </mesh>
+
+      {/* Nickname TABELASI — çatı üstünde */}
+      <mesh position={[0, 5.5, 0]} castShadow>
+        <boxGeometry args={[HOME_SIZE * 1.5, 1.2, 0.3]} />
+        <meshStandardMaterial
+          color={isLocal ? '#fbbf24' : '#3b82f6'}
+          emissive={isLocal ? '#fbbf24' : '#3b82f6'}
+          emissiveIntensity={0.4}
+        />
+      </mesh>
+      <Html position={[0, 5.5, 0.2]} center distanceFactor={14} zIndexRange={[10, 0]}>
+        <div className="pointer-events-none whitespace-nowrap px-2 text-xl font-black text-white drop-shadow-[2px_2px_0_#000]">
+          🏠 {nickname}
+        </div>
+      </Html>
+
+      {/* 8 SLOT */}
+      {HOME_SLOTS.map((s, i) => {
+        const ownedItem = owned.find((o) => o.slotIdx === i)
+        return (
+          <HomeSlot
+            key={i}
+            slotIdx={i}
+            position={s}
+            owned={ownedItem ?? null}
+            isLocal={isLocal}
+            victimId={victimId}
+            isMobile={isMobile}
+          />
+        )
+      })}
+    </group>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// HOME SLOT — Local slot'ta Z ile sat / mobile buton
+//            Remote slot'ta 3 saniye dur → çal
+// ═══════════════════════════════════════════════════════════════
+function HomeSlot({
+  slotIdx,
+  position,
+  owned,
+  isLocal,
+  victimId,
+  isMobile,
+}: {
+  slotIdx: number
+  position: [number, number, number]
+  owned: { defId: string; slotIdx: number; lockedUntil: number } | null
+  isLocal: boolean
+  victimId?: string
+  isMobile: boolean
+}) {
+  const { brainrotSell, brainrotEarn, brainrotLockSlot, brainrotCash } =
+    useGameStore()
+  const lastLockT = useRef(-10)
+  const stealStartT = useRef<number | null>(null)
+  const [stealProgress, setStealProgress] = useState(0)
+  const [nearby, setNearby] = useState(false)
+  const groupRef = useRef<Group>(null)
+
+  const def = owned ? getBrainrotDef(owned.defId) : null
+  const nowS = Date.now() / 1000
+  const isLocked = owned ? owned.lockedUntil > nowS : false
+
+  useFrame((state) => {
+    if (!owned || !groupRef.current) return
+    const t = state.clock.elapsedTime
+    const player = getPlayerHandle()
+    const pp = player?.getPos()
+    if (!pp) {
+      setNearby(false)
+      return
+    }
+    const worldPos = groupRef.current.getWorldPosition(
+      groupRef.current.position.clone()
+    )
+    const dx = pp.x - worldPos.x
+    const dy = pp.y - worldPos.y
+    const dz = pp.z - worldPos.z
+    const dist = Math.hypot(dx, dz)
+    const near = dist < 2.5 && Math.abs(dy) < 3.5
+    if (near !== nearby) setNearby(near)
+
+    if (isLocal) {
+      // Local: Auto-lock (3s cooldown, cash >= 50)
+      if (!isLocked && near && brainrotCash >= 50 && t - lastLockT.current > 3) {
+        lastLockT.current = t
+        brainrotLockSlot(slotIdx)
+        playPotion('grow')
+      }
+    } else {
+      // Remote: 3 sn dur → çal (kilit değilse)
+      if (isLocked) {
+        stealStartT.current = null
+        if (stealProgress > 0) setStealProgress(0)
+        return
+      }
+      if (near) {
+        if (stealStartT.current === null)
+          stealStartT.current = state.clock.elapsedTime
+        const elapsed = state.clock.elapsedTime - stealStartT.current
+        const STEAL_DUR = 3
+        const progress = Math.min(1, elapsed / STEAL_DUR)
+        if (progress !== stealProgress) setStealProgress(progress)
+        if (progress >= 1 && victimId) {
+          stealStartT.current = state.clock.elapsedTime + 5 // cooldown
+          setStealProgress(0)
+          sendBrainrotSteal(victimId, slotIdx)
+          playLaunch()
+        }
+      } else {
+        stealStartT.current = null
+        if (stealProgress > 0) setStealProgress(0)
+      }
+    }
+  })
+
+  const handleSellClick = () => {
+    if (!owned || !def) return
+    const gain = sellPriceFor(def)
+    if (brainrotSell(slotIdx)) {
+      brainrotEarn(gain)
+      playPotion('grow')
+    }
+  }
+
+  // Zemin rengi: local = altın, remote kilitli = kırmızı, remote = turuncu, boş = gri
+  const basePlateColor = owned
+    ? isLocal
+      ? '#fbbf24'
+      : isLocked
+        ? '#dc2626'
+        : '#f97316'
+    : '#52525b'
+
+  return (
+    <group ref={groupRef} position={position}>
+      {/* Slot kaidesi */}
+      <RigidBody type="fixed" colliders={false}>
+        <CuboidCollider args={[1, 0.2, 1]} position={[0, 0.2, 0]} />
+        <mesh position={[0, 0.2, 0]} receiveShadow>
+          <cylinderGeometry args={[1.1, 1.3, 0.4, 14]} />
+          <meshStandardMaterial color={basePlateColor} roughness={0.65} />
+        </mesh>
+      </RigidBody>
+      {/* Slot numarası */}
+      <Html position={[0, 0.55, 0]} center distanceFactor={8} zIndexRange={[10, 0]}>
+        <div className="pointer-events-none text-base font-black text-white drop-shadow">
+          {slotIdx + 1}
+        </div>
+      </Html>
+
+      {/* Owned karakter */}
+      {def && (
+        <group position={[0, 0.5, 0]}>
+          <BrainrotFigure def={def} idle={false} scale={0.85} />
+          <Html position={[0, 3.2, 0]} center distanceFactor={14} zIndexRange={[10, 0]}>
+            <div className="pointer-events-none flex flex-col items-center gap-0.5 whitespace-nowrap rounded-lg bg-black/75 px-2 py-1 text-xs text-white shadow">
+              <div className="font-bold">{def.name}</div>
+              <div className="text-[10px] text-yellow-300">
+                +{def.income.toLocaleString('tr')}💰/sn
+              </div>
+              {isLocked && isLocal && (
+                <div className="text-[9px] text-green-300">
+                  🔒 Kilitli ({Math.ceil(owned!.lockedUntil - nowS)}s)
+                </div>
+              )}
+              {isLocked && !isLocal && (
+                <div className="text-[9px] text-red-300">🔒 KİLİTLİ</div>
+              )}
+            </div>
+          </Html>
+
+          {/* ─ LOCAL: Mobile SAT butonu (yakındaysa) ─ */}
+          {isLocal && isMobile && nearby && (
+            <Html
+              position={[0, 4.3, 0]}
+              center
+              distanceFactor={12}
+              zIndexRange={[30, 0]}
+            >
+              <button
+                onPointerDown={(e) => {
+                  e.stopPropagation()
+                  handleSellClick()
+                }}
+                className="pointer-events-auto rounded-xl bg-green-600 px-4 py-2 text-base font-black text-white shadow-2xl ring-2 ring-green-300 active:scale-95 active:bg-green-700"
+              >
+                💰 SAT +{sellPriceFor(def).toLocaleString('tr')}
+              </button>
+            </Html>
+          )}
+
+          {/* ─ LOCAL: Desktop Z hint (yakındaysa) ─ */}
+          {isLocal && !isMobile && nearby && (
+            <Html
+              position={[0, 4.3, 0]}
+              center
+              distanceFactor={12}
+              zIndexRange={[30, 0]}
+            >
+              <div className="pointer-events-none rounded-xl bg-green-600 px-3 py-1.5 text-sm font-black text-white shadow-2xl ring-2 ring-green-300">
+                💰 Z ile sat +{sellPriceFor(def).toLocaleString('tr')}
+              </div>
+            </Html>
+          )}
+
+          {/* ─ REMOTE: Çalma progress bar ─ */}
+          {!isLocal && stealProgress > 0 && !isLocked && (
+            <Html
+              position={[0, 4.3, 0]}
+              center
+              distanceFactor={12}
+              zIndexRange={[30, 0]}
+            >
+              <div className="pointer-events-none flex flex-col items-center gap-1 rounded-xl bg-black/85 px-3 py-1.5 shadow-2xl">
+                <div className="text-xs font-black text-yellow-300">
+                  💎 ÇALIYOR...
+                </div>
+                <div className="h-1.5 w-28 rounded-full bg-gray-700">
+                  <div
+                    className="h-full rounded-full bg-yellow-400"
+                    style={{ width: `${stealProgress * 100}%` }}
+                  />
+                </div>
+              </div>
+            </Html>
+          )}
+        </group>
+      )}
+    </group>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MOD SIGNS
+// ═══════════════════════════════════════════════════════════════
 function ModeSign({
   label,
   desc,
@@ -423,12 +865,15 @@ function ModeSign({
   )
 }
 
+// ═══════════════════════════════════════════════════════════════
+// BELT BRAINROT — konveyordaki karakterler, yakınlaşınca satın al
+// ═══════════════════════════════════════════════════════════════
 function BeltBrainrot({
   item,
   onBuy,
 }: {
   item: BeltItem
-  onBuy: (defId: string, price: number) => void
+  onBuy: (defId: string, price: number, fromX: number, fromZ: number) => void
 }) {
   const groupRef = useRef<Group>(null)
   const def = useMemo(() => getBrainrotDef(item.defId), [item.defId])
@@ -452,7 +897,7 @@ function BeltBrainrot({
     const dz = pp.z - worldPos.z
     const near = Math.hypot(dx, dz) < 2.5 && Math.abs(pp.y - worldPos.y) < 3.5
     if (near && brainrotCash >= def.price) {
-      onBuy(def.id, def.price)
+      onBuy(def.id, def.price, x, 0)
     }
   })
 
@@ -484,7 +929,7 @@ function BeltBrainrot({
             >
               {RARITY_LABELS[def.rarity].toUpperCase()}
             </span>
-            <span>+{def.income}💰/sn</span>
+            <span>+{def.income.toLocaleString('tr')}💰/sn</span>
           </div>
           <div
             className={`rounded-md px-2 py-0.5 text-sm font-black ${
@@ -500,207 +945,56 @@ function BeltBrainrot({
   )
 }
 
-function BaseSlot({
-  slotIdx,
-  position,
-}: {
-  slotIdx: number
-  position: [number, number, number]
-}) {
-  const { brainrotOwned, brainrotLockSlot, brainrotCash } = useGameStore()
-  const owned = brainrotOwned.find((o) => o.slotIdx === slotIdx)
-  const def = owned ? getBrainrotDef(owned.defId) : null
-  const lastTapT = useRef(-10)
+// ═══════════════════════════════════════════════════════════════
+// WALKING BRAINROT — satın alınan karakter konveyordan eve yürür
+// ═══════════════════════════════════════════════════════════════
+function WalkingBrainrot({ item }: { item: WalkingItem }) {
+  const groupRef = useRef<Group>(null)
+  const def = useMemo(() => getBrainrotDef(item.defId), [item.defId])
 
-  useFrame((state) => {
-    if (!owned) return
-    const t = state.clock.elapsedTime
-    const nowS = Date.now() / 1000
-    const isLocked = owned.lockedUntil > nowS
-    if (isLocked) return
-    const player = getPlayerHandle()
-    const pp = player?.getPos()
-    if (!pp) return
-    const dx = pp.x - position[0]
-    const dz = pp.z - position[2]
-    if (Math.hypot(dx, dz) < 1.5 && Math.abs(pp.y - position[1]) < 3) {
-      if (brainrotCash >= 50 && t - lastTapT.current > 3) {
-        lastTapT.current = t
-        brainrotLockSlot(slotIdx)
-        playPotion('grow')
-      }
-    }
+  useFrame(() => {
+    if (!groupRef.current || !def) return
+    const nowS = performance.now() / 1000
+    const progress = Math.min(1, (nowS - item.startT) / item.duration)
+    const ease = progress < 0.5
+      ? 2 * progress * progress
+      : 1 - Math.pow(-2 * progress + 2, 2) / 2
+    const x = item.from[0] + (item.to[0] - item.from[0]) * ease
+    const z = item.from[2] + (item.to[2] - item.from[2]) * ease
+    // Zıplama efekti — her adım 0.5s
+    const bob = Math.abs(Math.sin(progress * Math.PI * 6)) * 0.35
+    groupRef.current.position.set(x, item.from[1] + bob, z)
+    // Yüz yönü
+    const dx = item.to[0] - item.from[0]
+    const dz = item.to[2] - item.from[2]
+    groupRef.current.rotation.y = Math.atan2(dx, dz)
   })
 
-  const isLocked = owned ? owned.lockedUntil > Date.now() / 1000 : false
+  if (!def) return null
 
   return (
-    <group position={position}>
-      <RigidBody type="fixed" colliders={false}>
-        <CuboidCollider args={[1.2, 0.3, 1.2]} position={[0, 0.3, 0]} />
-        <mesh position={[0, 0.3, 0]} castShadow receiveShadow>
-          <cylinderGeometry args={[1.3, 1.5, 0.6, 12]} />
-          <meshToonMaterial color={owned ? '#ffd60a' : '#4a5568'} />
-        </mesh>
-      </RigidBody>
-      <Html position={[0, 0.7, 0]} center distanceFactor={8} zIndexRange={[10, 0]}>
-        <div className="pointer-events-none text-lg font-black text-white drop-shadow">
-          {slotIdx + 1}
-        </div>
-      </Html>
-      {def && (
-        <group position={[0, 0.7, 0]}>
-          <BrainrotFigure def={def} idle={false} />
-          <Html position={[0, 3.8, 0]} center distanceFactor={14} zIndexRange={[10, 0]}>
-            <div className="pointer-events-none flex flex-col items-center gap-0.5 whitespace-nowrap rounded-lg bg-black/75 px-2 py-1 text-xs text-white shadow">
-              <div className="font-bold">{def.name}</div>
-              <div className="text-[10px] text-yellow-300">
-                +{def.income.toLocaleString('tr')}💰/sn
-              </div>
-              {isLocked ? (
-                <div className="text-[9px] text-green-300">
-                  🔒 Kilitli ({Math.ceil((owned!.lockedUntil - Date.now() / 1000))}s)
-                </div>
-              ) : (
-                <div className="text-[9px] text-orange-300">
-                  Kilitlemek için üstüne gel (−50💰)
-                </div>
-              )}
-            </div>
-          </Html>
-        </group>
-      )}
+    <group ref={groupRef} position={item.from}>
+      <BrainrotFigure def={def} idle={false} scale={0.9} />
     </group>
   )
 }
 
-// ═══════════════════════════════════════════════════════════
-// SAT alanı — yaklaşıp E ile son slotunu satar
-// Basit yaklaşım: HTML'de tıklanabilir sell butonu ile her slot satılabilir
-// ═══════════════════════════════════════════════════════════
-function SellZone({ position }: { position: [number, number, number] }) {
-  const glowRef = useRef<Mesh>(null)
-  const lastActT = useRef(-10)
-  const [expanded, setExpanded] = useState(false)
-  const { brainrotOwned, brainrotSell, brainrotEarn } = useGameStore()
-  const [recentSold, setRecentSold] = useState<string | null>(null)
-
-  useFrame((state) => {
-    const t = state.clock.elapsedTime
-    if (glowRef.current) {
-      const s = 1 + Math.sin(t * 2) * 0.05
-      glowRef.current.scale.set(s, s, s)
-    }
-    const player = getPlayerHandle()
-    const pp = player?.getPos()
-    if (!pp) return
-    const dx = pp.x - position[0]
-    const dz = pp.z - position[2]
-    const near = Math.hypot(dx, dz) < 3 && Math.abs(pp.y - position[1]) < 3
-    if (near !== expanded && t - lastActT.current > 0.3) {
-      lastActT.current = t
-      setExpanded(near)
-    }
-  })
-
-  const handleSell = (slotIdx: number) => {
-    const owned = brainrotOwned.find((o) => o.slotIdx === slotIdx)
-    if (!owned) return
-    const def = getBrainrotDef(owned.defId)
-    if (!def) return
-    const price = sellPriceFor(def)
-    if (brainrotSell(slotIdx)) {
-      brainrotEarn(price)
-      setRecentSold(`${def.name} → +${price.toLocaleString('tr')} 💰`)
-      playPotion('grow')
-      setTimeout(() => setRecentSold(null), 2500)
-    }
-  }
-
-  return (
-    <group position={position}>
-      <mesh ref={glowRef}>
-        <boxGeometry args={[3, 2, 0.4]} />
-        <meshStandardMaterial
-          color="#10b981"
-          emissive="#10b981"
-          emissiveIntensity={0.5}
-          toneMapped={false}
-        />
-      </mesh>
-      <Html position={[0, 1.6, 0.3]} center distanceFactor={8} zIndexRange={[10, 0]}>
-        <div className="pointer-events-none whitespace-nowrap rounded-md bg-green-700 px-2 py-1 text-sm font-black text-white shadow">
-          💰 SHOP — SAT
-        </div>
-      </Html>
-      {expanded && brainrotOwned.length > 0 && (
-        <Html position={[0, 4, 0.3]} center distanceFactor={10} zIndexRange={[20, 0]}>
-          <div
-            className="flex max-h-96 flex-col gap-1 overflow-y-auto rounded-xl bg-black/90 p-3 text-white shadow-2xl"
-            style={{ minWidth: '300px' }}
-          >
-            <div className="mb-1 text-center text-sm font-black">
-              💸 Karakter Sat (%60 geri al)
-            </div>
-            {brainrotOwned.map((o) => {
-              const def = getBrainrotDef(o.defId)
-              if (!def) return null
-              const sellPrice = sellPriceFor(def)
-              const rarityColor = RARITY_COLORS[def.rarity]
-              return (
-                <button
-                  key={o.id}
-                  onClick={() => handleSell(o.slotIdx)}
-                  className="flex items-center justify-between gap-2 rounded-lg bg-gray-800 px-3 py-2 text-left hover:bg-gray-700"
-                >
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="inline-block h-3 w-3 rounded-full"
-                      style={{ background: rarityColor }}
-                    />
-                    <div>
-                      <div className="text-xs font-bold">{def.name}</div>
-                      <div className="text-[10px] opacity-70">
-                        slot {o.slotIdx + 1} · {RARITY_LABELS[def.rarity]}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="rounded bg-green-600 px-2 py-1 text-xs font-black">
-                    +{sellPrice.toLocaleString('tr')} 💰
-                  </div>
-                </button>
-              )
-            })}
-          </div>
-        </Html>
-      )}
-      {recentSold && (
-        <Html position={[0, 3, 0.3]} center distanceFactor={10} zIndexRange={[20, 0]}>
-          <div className="pointer-events-none whitespace-nowrap rounded-lg bg-green-600 px-3 py-1.5 text-sm font-black text-white shadow-xl">
-            ✅ {recentSold}
-          </div>
-        </Html>
-      )}
-    </group>
-  )
-}
-
-// ═══════════════════════════════════════════════════════════
-// TSUNAMI dalgası
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// TSUNAMI
+// ═══════════════════════════════════════════════════════════════
 function TsunamiWave() {
   const waveRef = useRef<Mesh>(null)
   const foamRef = useRef<Mesh>(null)
   const lastHitT = useRef(0)
-  const [waveX, setWaveX] = useState(-30)
+  const [waveX, setWaveX] = useState(-40)
 
   useEffect(() => {
     let start = performance.now()
     let raf = 0
     const tick = () => {
       const elapsed = (performance.now() - start) / 1000
-      const progress = (elapsed / 12) % 1
-      const x = -30 + progress * 60
+      const progress = (elapsed / 14) % 1
+      const x = -40 + progress * 80
       setWaveX(x)
       raf = requestAnimationFrame(tick)
     }
@@ -731,8 +1025,8 @@ function TsunamiWave() {
 
   return (
     <>
-      <mesh ref={waveRef} position={[-30, 4, 0]} castShadow>
-        <boxGeometry args={[4, 8, 50]} />
+      <mesh ref={waveRef} position={[-40, 4, 0]} castShadow>
+        <boxGeometry args={[4, 8, 80]} />
         <meshStandardMaterial
           color="#2e9fd8"
           emissive="#1e90ff"
@@ -743,8 +1037,8 @@ function TsunamiWave() {
           roughness={0.25}
         />
       </mesh>
-      <mesh ref={foamRef} position={[-30, 8.5, 0]}>
-        <boxGeometry args={[4.5, 1, 51]} />
+      <mesh ref={foamRef} position={[-40, 8.5, 0]}>
+        <boxGeometry args={[4.5, 1, 81]} />
         <meshBasicMaterial color="#ffffff" transparent opacity={0.7} />
       </mesh>
       <Html position={[0, 10, 0]} center distanceFactor={14} zIndexRange={[10, 0]}>
@@ -753,197 +1047,5 @@ function TsunamiWave() {
         </div>
       </Html>
     </>
-  )
-}
-
-// ═══════════════════════════════════════════════════════════
-// REMOTE PLAYER BASE — diğer oyuncunun slot'ları
-// Oyuncu yaklaşıp üzerine F basarsa (auto-tetik) kilitli değilse çalar
-// ═══════════════════════════════════════════════════════════
-function RemotePlayerBase({
-  remote,
-}: {
-  remote: RemoteBrainrotState & { offsetX: number }
-}) {
-  return (
-    <group position={[remote.offsetX, 0, 0]}>
-      {/* Platform */}
-      <RigidBody type="fixed" colliders={false}>
-        <CuboidCollider args={[22, 0.5, 18]} position={[0, -0.5, 0]} />
-        <mesh position={[0, -0.5, 0]} castShadow receiveShadow>
-          <boxGeometry args={[44, 1, 36]} />
-          <meshToonMaterial color="#fef3c7" />
-        </mesh>
-      </RigidBody>
-
-      {/* Nickname */}
-      <Html position={[0, 6, 14]} center distanceFactor={16} zIndexRange={[10, 0]}>
-        <div className="pointer-events-none whitespace-nowrap rounded-xl bg-black/80 px-4 py-1.5 text-base font-black text-white shadow-xl">
-          🏠 {remote.nickname}'in Bazası
-        </div>
-      </Html>
-
-      {/* Slot'lar */}
-      {BASE_SLOTS.map((s, i) => {
-        const owned = remote.owned.find((o) => o.slotIdx === i)
-        return (
-          <RemoteSlot
-            key={`rs${remote.id}-${i}`}
-            slotIdx={i}
-            position={s}
-            owned={owned ?? null}
-            victimId={remote.id}
-          />
-        )
-      })}
-    </group>
-  )
-}
-
-function RemoteSlot({
-  slotIdx,
-  position,
-  owned,
-  victimId,
-}: {
-  slotIdx: number
-  position: [number, number, number]
-  owned: { defId: string; lockedUntil: number } | null
-  victimId: string
-}) {
-  const lastStealT = useRef(-10)
-  const def = owned ? getBrainrotDef(owned.defId) : null
-  const isLocked = owned ? owned.lockedUntil > Date.now() / 1000 : false
-
-  useFrame((state) => {
-    if (!owned || isLocked) return
-    const t = state.clock.elapsedTime
-    const player = getPlayerHandle()
-    const pp = player?.getPos()
-    if (!pp) return
-    // offsetX parent group'ta olduğu için bu relatif pozisyon yeterli değil
-    // → parent'ın worldPosition'ına göre hesaplama gerek.
-    // Kolay yol: iki coordinate sistemini bileştirip distance ölç
-    const player2Dx = pp.x
-    const player2Dz = pp.z
-    // Not: Zone ve parent offset burada bilinmiyor, en güvenlisi:
-    // Steal tetiğini sadece çok yakınsa (2m) ve 5sn cooldown'la bırak
-    if (t - lastStealT.current > 5) {
-      // Basit proxy: oyuncu uzak sahanda değilse yaklaşım aralığını geniş tut
-      const zoneSize = 30
-      if (Math.abs(player2Dx) < 1000 && Math.abs(player2Dz) < 1000) {
-        // Yakın çal tetiği için distance'ı daha hassas yap — parent pozisyonu
-        // component'a prop olarak verilmedi, bu yüzden useFrame'de world space'e göre çalıştıralım:
-        // Bu hesabı parent group worldPosition'a göre yapalım:
-        // (state.scene'de bir ref lazım, ama basit tutmak için yaklaşımı kaldırıyorum)
-      }
-    }
-  })
-
-  return (
-    <group position={position}>
-      <RigidBody type="fixed" colliders={false}>
-        <CuboidCollider args={[1.2, 0.3, 1.2]} position={[0, 0.3, 0]} />
-        <mesh position={[0, 0.3, 0]} castShadow receiveShadow>
-          <cylinderGeometry args={[1.3, 1.5, 0.6, 12]} />
-          <meshToonMaterial color={owned ? (isLocked ? '#dc2626' : '#f97316') : '#52525b'} />
-        </mesh>
-      </RigidBody>
-      <Html position={[0, 0.7, 0]} center distanceFactor={8} zIndexRange={[10, 0]}>
-        <div className="pointer-events-none text-lg font-black text-white drop-shadow">
-          {slotIdx + 1}
-        </div>
-      </Html>
-      {def && (
-        <group position={[0, 0.7, 0]}>
-          <BrainrotFigure def={def} idle={false} />
-          <StealTrigger
-            victimId={victimId}
-            slotIdx={slotIdx}
-            isLocked={isLocked}
-            defName={def.name}
-          />
-        </group>
-      )}
-    </group>
-  )
-}
-
-// StealTrigger — oyuncu yakınsa 3 sn hover sonrası çalma işlemi
-function StealTrigger({
-  victimId,
-  slotIdx,
-  isLocked,
-  defName,
-}: {
-  victimId: string
-  slotIdx: number
-  isLocked: boolean
-  defName: string
-}) {
-  const group = useRef<Group>(null)
-  const lastStealT = useRef(-10)
-  const stealStartT = useRef<number | null>(null)
-  const [hoverProgress, setHoverProgress] = useState(0)
-
-  useFrame((state) => {
-    if (isLocked || !group.current) {
-      setHoverProgress(0)
-      stealStartT.current = null
-      return
-    }
-    const t = state.clock.elapsedTime
-    const player = getPlayerHandle()
-    const pp = player?.getPos()
-    if (!pp) return
-    const worldPos = group.current.getWorldPosition(group.current.position.clone())
-    const dx = pp.x - worldPos.x
-    const dy = pp.y - worldPos.y
-    const dz = pp.z - worldPos.z
-    const dist = Math.hypot(dx, dz)
-
-    if (dist < 2.5 && Math.abs(dy) < 3.5) {
-      if (stealStartT.current === null) stealStartT.current = t
-      const elapsed = t - stealStartT.current
-      const STEAL_DURATION = 3
-      setHoverProgress(Math.min(1, elapsed / STEAL_DURATION))
-      if (elapsed >= STEAL_DURATION && t - lastStealT.current > 5) {
-        lastStealT.current = t
-        stealStartT.current = null
-        setHoverProgress(0)
-        sendBrainrotSteal(victimId, slotIdx)
-        playLaunch()
-      }
-    } else {
-      stealStartT.current = null
-      if (hoverProgress > 0) setHoverProgress(0)
-    }
-  })
-
-  return (
-    <group ref={group}>
-      <Html position={[0, 3.8, 0]} center distanceFactor={14} zIndexRange={[10, 0]}>
-        <div className="pointer-events-none flex flex-col items-center gap-0.5 whitespace-nowrap rounded-lg bg-black/75 px-2 py-1 text-xs text-white shadow">
-          <div className="font-bold">{defName}</div>
-          {isLocked ? (
-            <div className="text-[10px] text-red-400">🔒 KİLİTLİ</div>
-          ) : hoverProgress > 0 ? (
-            <div className="flex flex-col items-center">
-              <div className="text-[10px] text-yellow-300">💎 ÇALIYOR...</div>
-              <div className="mt-0.5 h-1.5 w-24 rounded-full bg-gray-700">
-                <div
-                  className="h-full rounded-full bg-yellow-400 transition-all"
-                  style={{ width: `${hoverProgress * 100}%` }}
-                />
-              </div>
-            </div>
-          ) : (
-            <div className="text-[9px] text-orange-300">
-              3sn dur → çal
-            </div>
-          )}
-        </div>
-      </Html>
-    </group>
   )
 }
