@@ -2,6 +2,7 @@
 
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
+import { Text } from '@react-three/drei'
 import type { Group, Mesh } from 'three'
 import type { BrainrotDef } from '@/lib/brainrots'
 import { RARITY_GLOW } from '@/lib/brainrots'
@@ -87,8 +88,8 @@ export default function BrainrotFigure({ def, idle = true, scale = 1 }: Props) {
       {/* ─── BODY (shape'e göre) ─── */}
       <Body def={def} h={bodyHeight} r={bodyRadius} />
 
-      {/* Floating disk tabanı */}
-      {def.shape === 'floating' && (
+      {/* Floating disk tabanı — Şans Bloğu'nda yok (flames var) */}
+      {def.shape === 'floating' && def.id !== 'sansblogu' && (
         <mesh position={[0, 0.05, 0]}>
           <cylinderGeometry args={[bodyRadius * 0.9, bodyRadius * 0.7, 0.15, 12]} />
           <meshStandardMaterial
@@ -249,6 +250,66 @@ export default function BrainrotFigure({ def, idle = true, scale = 1 }: Props) {
 function Body({ def, h, r }: { def: BrainrotDef; h: number; r: number }) {
   const y = h / 2 + 0.4
 
+  // ─── ŞANS BLOĞU: Mario soru bloğu küpü ───
+  if (def.id === 'sansblogu') {
+    const side = 1.8
+    const cornerX = 0.65
+    const cornerY = 0.65
+    return (
+      <>
+        {/* Ana blok */}
+        <mesh position={[0, y, 0]} castShadow>
+          <boxGeometry args={[side, side, side]} />
+          <meshStandardMaterial
+            color={def.color}
+            roughness={0.3}
+            metalness={0.15}
+            emissive={def.color}
+            emissiveIntensity={0.12}
+          />
+        </mesh>
+        {/* Üst kenar bandı */}
+        <mesh position={[0, y + side * 0.48, 0]}>
+          <boxGeometry args={[side + 0.02, 0.09, side + 0.02]} />
+          <meshStandardMaterial color={def.accent} roughness={0.5} />
+        </mesh>
+        {/* Alt kenar bandı */}
+        <mesh position={[0, y - side * 0.48, 0]}>
+          <boxGeometry args={[side + 0.02, 0.09, side + 0.02]} />
+          <meshStandardMaterial color={def.accent} roughness={0.5} />
+        </mesh>
+        {/* 4 köşe vida/bolt — ön yüzde */}
+        {(
+          [
+            [-cornerX, y + cornerY],
+            [cornerX, y + cornerY],
+            [-cornerX, y - cornerY],
+            [cornerX, y - cornerY],
+          ] as [number, number][]
+        ).map(([bx, by], i) => (
+          <mesh key={`bolt${i}`} position={[bx, by, r + 0.02]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+            <cylinderGeometry args={[0.1, 0.1, 0.07, 8]} />
+            <meshStandardMaterial color={def.accent} metalness={0.85} roughness={0.15} />
+          </mesh>
+        ))}
+        {/* 4 köşe vida/bolt — arka yüzde */}
+        {(
+          [
+            [-cornerX, y + cornerY],
+            [cornerX, y + cornerY],
+            [-cornerX, y - cornerY],
+            [cornerX, y - cornerY],
+          ] as [number, number][]
+        ).map(([bx, by], i) => (
+          <mesh key={`boltB${i}`} position={[bx, by, -r - 0.02]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+            <cylinderGeometry args={[0.1, 0.1, 0.07, 8]} />
+            <meshStandardMaterial color={def.accent} metalness={0.85} roughness={0.15} />
+          </mesh>
+        ))}
+      </>
+    )
+  }
+
   if (def.shape === 'round' || def.shape === 'spiky' || def.shape === 'floating') {
     return (
       <mesh position={[0, y, 0]} castShadow>
@@ -318,6 +379,36 @@ function HeadWithFace({
   bodyHeight: number
   bodyRadius: number
 }) {
+  // ─── ŞANS BLOĞU: tek büyük göz + "?" gözbebebi ön yüzde ───
+  if (def.id === 'sansblogu') {
+    const blockCenterY = h / 2 + 0.4 // = 1.0
+    const frontZ = r + 0.05           // = 0.95
+    return (
+      <group position={[0, blockCenterY, 0]}>
+        {/* Büyük tek göz (beyaz) */}
+        <mesh position={[0, 0, frontZ]}>
+          <sphereGeometry args={[0.38, 16, 14]} />
+          <meshBasicMaterial color="#ffffff" />
+        </mesh>
+        {/* "?" gözbebebi — üst yay */}
+        <mesh position={[0, 0.1, frontZ + 0.34]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.12, 0.048, 8, 16, Math.PI * 1.6]} />
+          <meshBasicMaterial color="#1a1a1a" />
+        </mesh>
+        {/* "?" kuyruk çubuğu */}
+        <mesh position={[0.01, -0.06, frontZ + 0.33]}>
+          <boxGeometry args={[0.048, 0.12, 0.04]} />
+          <meshBasicMaterial color="#1a1a1a" />
+        </mesh>
+        {/* "?" nokta */}
+        <mesh position={[0.01, -0.22, frontZ + 0.33]}>
+          <sphereGeometry args={[0.048, 8, 8]} />
+          <meshBasicMaterial color="#1a1a1a" />
+        </mesh>
+      </group>
+    )
+  }
+
   // Serpentine için kafa en öndeki sphere'e bakar
   const headY = def.shape === 'quadruped' ? h * 0.7 + 0.7 : h + 0.8
   const headX = def.shape === 'quadruped' ? 0 : def.shape === 'serpentine' ? 1.3 : 0
@@ -921,6 +1012,76 @@ function Accessory({
         <mesh position={[0, h + 1.35, 0]} castShadow>
           <cylinderGeometry args={[r * 1.1, r * 1.1, 0.08, 16]} />
           <meshStandardMaterial color="#18181b" metalness={0.1} roughness={0.6} />
+        </mesh>
+      </>
+    )
+  }
+
+  // ─── ŞANS BLOĞU: alttan alev / motor efekti ───
+  if (a === 'lucky-block') {
+    // Blok tabanı: floating h=1.2, r=0.9 → merkez y=1.0, alt y=0.1
+    const blockBottomY = h / 2 + 0.4 - 0.9 // ≈ 0.1
+    const flameY = blockBottomY - 0.18       // alev merkezi ≈ -0.08
+    const positions: [number, number][] = [
+      [0, 0], [-0.45, -0.35], [0.45, -0.35], [-0.45, 0.35], [0.45, 0.35],
+    ]
+    return (
+      <>
+        {positions.map(([fx, fz], i) => (
+          <group key={`flame${i}`}>
+            {/* Dış alev (turuncu, geniş) */}
+            <mesh position={[fx, flameY, fz]} rotation={[Math.PI, 0, 0]}>
+              <coneGeometry args={[i === 0 ? 0.22 : 0.16, i === 0 ? 0.6 : 0.45, 8]} />
+              <meshStandardMaterial
+                color="#f97316"
+                emissive="#f97316"
+                emissiveIntensity={2.5}
+                toneMapped={false}
+                transparent
+                opacity={0.92}
+              />
+            </mesh>
+            {/* İç alev (sarı, ince) */}
+            <mesh position={[fx, flameY + 0.08, fz]} rotation={[Math.PI, 0, 0]}>
+              <coneGeometry args={[i === 0 ? 0.12 : 0.08, i === 0 ? 0.38 : 0.28, 6]} />
+              <meshStandardMaterial
+                color="#fef08a"
+                emissive="#ffffff"
+                emissiveIntensity={2}
+                toneMapped={false}
+                transparent
+                opacity={0.98}
+              />
+            </mesh>
+          </group>
+        ))}
+      </>
+    )
+  }
+
+  // ─── SIX SEVEN: "67" yazısı göğüste ───
+  if (a === 'number-67') {
+    const frontZ = r * 1.02 + 0.02
+    const midY = h * 0.58 + 0.4
+    return (
+      <>
+        {/* "6" — sol taraf: torus halka + iniş çubuğu */}
+        <mesh position={[-0.22, midY + 0.12, frontZ]}>
+          <torusGeometry args={[0.15, 0.046, 8, 16]} />
+          <meshBasicMaterial color={def.accent} />
+        </mesh>
+        <mesh position={[-0.22, midY - 0.1, frontZ]}>
+          <boxGeometry args={[0.046, 0.22, 0.04]} />
+          <meshBasicMaterial color={def.accent} />
+        </mesh>
+        {/* "7" — sağ taraf: üst yatay bar + çapraz iniş */}
+        <mesh position={[0.22, midY + 0.26, frontZ]}>
+          <boxGeometry args={[0.3, 0.046, 0.04]} />
+          <meshBasicMaterial color={def.accent} />
+        </mesh>
+        <mesh position={[0.25, midY + 0.02, frontZ]} rotation={[0, 0, 0.38]}>
+          <boxGeometry args={[0.046, 0.42, 0.04]} />
+          <meshBasicMaterial color={def.accent} />
         </mesh>
       </>
     )

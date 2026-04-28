@@ -65,6 +65,8 @@ export type BrainrotDef = {
     | 'eyepatch'
     | 'mustache'
     | 'suit-tie'
+    | 'number-67'   // Six Seven
+    | 'lucky-block' // Şans Bloğu
 }
 
 export const RARITY_COLORS: Record<Rarity, string> = {
@@ -180,7 +182,10 @@ export const BRAINROTS: BrainrotDef[] = [
   { id: 'tuktukbombas', name: 'Tuktukbombas Mytik', rarity: 'mythic', price: 2100000, income: 135000, color: '#c77dff', accent: '#ffd60a', shape: 'spiky' },
   { id: 'kristallinka', name: 'Kristallinka Dorada', rarity: 'mythic', price: 3000000, income: 190000, color: '#f0f9ff', accent: '#3b82f6', shape: 'floating', accessory: 'ice-crystal' },
   { id: 'galaksitto', name: 'Galaksitto Supremo', rarity: 'mythic', price: 4100000, income: 265000, color: '#1e1b4b', accent: '#a855f7', shape: 'floating', accessory: 'galaxy-ring' },
-  { id: 'voidworrior', name: 'Voidworrior Oscuro', rarity: 'mythic', price: 4900000, income: 320000, color: '#000000', accent: '#6d28d9', shape: 'serpentine' },
+  { id: 'sixseven', name: 'Six Seven', rarity: 'mythic', price: 4900000, income: 320000, color: '#8b5cf6', accent: '#ffffff', shape: 'tall', accessory: 'number-67' },
+
+  // ─── EPİK — Şans Bloğu (özel, dönüşüm mekanik) ───
+  { id: 'sansblogu', name: 'Şans Bloğu', rarity: 'epic', price: 8888, income: 50, color: '#fbbf24', accent: '#92400e', shape: 'floating', accessory: 'lucky-block' },
 
   // ─── BRAINROT KRALI (3 karakter, $15.000.000-30.000.000) ───
   { id: 'anthropicus', name: 'Anthropicus Maximus', rarity: 'brainrot_king', price: 16000000, income: 950000, color: '#cbd5e1', accent: '#f97316', shape: 'floating', accessory: 'halo' },
@@ -192,9 +197,9 @@ export const BRAINROTS: BrainrotDef[] = [
   { id: 'imperatorello', name: 'Dioimperatorello', rarity: 'celestial', price: 99000000, income: 5900000, color: '#ffffff', accent: '#fbbf24', shape: 'floating', accessory: 'crown' },
 ]
 
-// Tek yerden kontrol — 50 karakter garanti
-if (BRAINROTS.length !== 50) {
-  console.warn(`[brainrots] Expected 50 characters, got ${BRAINROTS.length}`)
+// Tek yerden kontrol — 51 karakter garanti (50 + Şans Bloğu)
+if (BRAINROTS.length !== 51) {
+  console.warn(`[brainrots] Expected 51 characters, got ${BRAINROTS.length}`)
 }
 
 // randomBrainrot — %85 ihtimalle bir karakter döner, %15 null (boş spawn)

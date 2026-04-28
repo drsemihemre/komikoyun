@@ -103,6 +103,7 @@ type GameState = {
   brainrotSell: (slotIdx: number) => boolean
   brainrotApplySteal: (slotIdx: number) => boolean // başkası çaldı → sen kaybet
   brainrotReceiveStolen: (defId: string) => boolean // başkasından çalındı → sen kazan
+  brainrotTransform: (slotIdx: number, newDefId: string) => boolean // Şans Bloğu → yeni karakter
   brainrotReset: () => void
   drinkPotion: (p: PotionType) => void
   resetPotions: () => void
@@ -489,6 +490,19 @@ export const useGameStore = create<GameState>((set) => ({
       )
     } catch {}
     useGameStore.setState({ brainrotOwned: newOwned })
+    return true
+  },
+  brainrotTransform: (slotIdx, newDefId) => {
+    const s = useGameStore.getState()
+    const owned = s.brainrotOwned.find((o) => o.slotIdx === slotIdx)
+    if (!owned) return false
+    const updated = s.brainrotOwned.map((o) =>
+      o.slotIdx === slotIdx ? { ...o, defId: newDefId, lockedUntil: 0 } : o
+    )
+    try {
+      window.localStorage.setItem('komikoyun_br_owned', JSON.stringify(updated))
+    } catch {}
+    useGameStore.setState({ brainrotOwned: updated })
     return true
   },
   brainrotReset: () => {

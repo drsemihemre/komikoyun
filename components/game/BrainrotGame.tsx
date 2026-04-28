@@ -8,6 +8,7 @@ import type { Group, Mesh } from 'three'
 import { getPlayerHandle } from '@/lib/playerHandle'
 import { useGameStore } from '@/lib/store'
 import {
+  BRAINROTS,
   RARITY_COLORS,
   RARITY_LABELS,
   getBrainrotDef,
@@ -182,9 +183,13 @@ function GameZone() {
   const syncTickRef = useRef(0)
   const nickname = useMemo(() => loadNickname() || 'Sen', [])
 
-  const { brainrotCash, brainrotOwned, brainrotBuy, brainrotEarn } =
+  const { brainrotCash, brainrotOwned, brainrotBuy, brainrotEarn, brainrotTransform } =
     useGameStore()
   const isMobile = useGameStore((s) => s.isMobile)
+
+  // Şans Bloğu zamanlayıcıları: slotIdx → yerleştirilme zamanı (ms)
+  const [luckyTimers, setLuckyTimers] = useState<Record<number, number>>({})
+  const luckyTimersRef = useRef<Record<number, number>>({})
 
   const [, setTick] = useState(0)
   useEffect(() => {
@@ -276,14 +281,54 @@ function GameZone() {
       // def null ise konveyor boş geçti (%15)
     }
 
-    // Pasif gelir
+    // Pasif gelir + Şans Bloğu dönüşüm kontrolü
     if (t - earnTickRef.current > 1) {
       earnTickRef.current = t
-      const totalIncome = brainrotOwned.reduce((sum, o) => {
+      const storeState = useGameStore.getState()
+      const totalIncome = storeState.brainrotOwned.reduce((sum, o) => {
         const def = getBrainrotDef(o.defId)
         return sum + (def?.income ?? 0)
       }, 0)
       if (totalIncome > 0) brainrotEarn(totalIncome)
+
+      // ── Şans Bloğu: 60 saniye dolunca dönüştür ──
+      for (const owned of storeState.brainrotOwned) {
+        if (owned.defId !== 'sansblogu') continue
+        const now = Date.now()
+        let placedAt = luckyTimersRef.current[owned.slotIdx]
+        if (!placedAt) {
+          // Sayfa yenilemede başla
+          placedAt = now
+          luckyTimersRef.current[owned.slotIdx] = now
+          setLuckyTimers((prev) => ({ ...prev, [owned.slotIdx]: now }))
+          continue
+        }
+        const elapsed = (now - placedAt) / 1000
+        if (elapsed >= 60) {
+          // Aynı rarity'den rastgele bir brainrot seç (Şans Bloğu hariç)
+          const sansDef = getBrainrotDef('sansblogu')
+          const candidates = BRAINROTS.filter(
+            (b) => b.rarity === sansDef?.rarity && b.id !== 'sansblogu'
+          )
+          if (candidates.length > 0) {
+            const revealed = candidates[Math.floor(Math.random() * candidates.length)]
+            // Zamanlayıcıyı temizle
+            delete luckyTimersRef.current[owned.slotIdx]
+            setLuckyTimers((prev) => {
+              const next = { ...prev }
+              delete next[owned.slotIdx]
+              return next
+            })
+            storeState.brainrotTransform(owned.slotIdx, revealed.id)
+            setBanner({
+              text: `🎰 Şans Bloğu açıldı! → ${revealed.name} çıktı!`,
+              color: '#f59e0b',
+            })
+            playPotion('grow')
+            setTimeout(() => setBanner(null), 5000)
+          }
+        }
+      }
     }
 
     // Server sync
@@ -338,6 +383,12 @@ function GameZone() {
           duration: 2.8,
         },
       ])
+    }
+    // Şans Bloğu zamanlayıcısını başlat
+    if (defId === 'sansblogu') {
+      const now = Date.now()
+      luckyTimersRef.current[slotIdx] = now
+      setLuckyTimers((prev) => ({ ...prev, [slotIdx]: now }))
     }
     playPotion('grow')
     return true
@@ -416,6 +467,7 @@ function GameZone() {
         isLocal
         owned={brainrotOwned}
         isMobile={isMobile}
+        luckyTimers={luckyTimers}
       />
 
       {/* ═══ REMOTE HOMES ═══ */}
@@ -494,6 +546,7 @@ function PlayerHome({
   owned,
   victimId,
   isMobile,
+  luckyTimers,
 }: {
   position: [number, number, number]
   nickname: string
@@ -501,6 +554,7 @@ function PlayerHome({
   owned: Array<{ defId: string; slotIdx: number; lockedUntil: number }>
   victimId?: string
   isMobile: boolean
+  luckyTimers?: Record<number, number>
 }) {
   const platformColor = isLocal ? '#fef3c7' : '#e2e8f0'
   const fenceColor = isLocal ? '#f97316' : '#64748b'
@@ -588,6 +642,7 @@ function PlayerHome({
             isLocal={isLocal}
             victimId={victimId}
             isMobile={isMobile}
+            luckyPlacedAt={luckyTimers?.[i]}
           />
         )
       })}
@@ -606,6 +661,7 @@ function HomeSlot({
   isLocal,
   victimId,
   isMobile,
+  luckyPlacedAt,
 }: {
   slotIdx: number
   position: [number, number, number]
@@ -613,6 +669,7 @@ function HomeSlot({
   isLocal: boolean
   victimId?: string
   isMobile: boolean
+  luckyPlacedAt?: number
 }) {
   const { brainrotSell, brainrotEarn, brainrotLockSlot, brainrotCash } =
     useGameStore()
@@ -620,7 +677,23 @@ function HomeSlot({
   const stealStartT = useRef<number | null>(null)
   const [stealProgress, setStealProgress] = useState(0)
   const [nearby, setNearby] = useState(false)
+  const [lbCountdown, setLbCountdown] = useState<number | null>(null)
   const groupRef = useRef<Group>(null)
+
+  // Şans Bloğu geri sayım
+  useEffect(() => {
+    if (owned?.defId !== 'sansblogu' || !luckyPlacedAt) {
+      setLbCountdown(null)
+      return
+    }
+    const update = () => {
+      const elapsed = (Date.now() - luckyPlacedAt) / 1000
+      setLbCountdown(Math.max(0, Math.ceil(60 - elapsed)))
+    }
+    update()
+    const id = setInterval(update, 1000)
+    return () => clearInterval(id)
+  }, [owned?.defId, luckyPlacedAt])
 
   const def = owned ? getBrainrotDef(owned.defId) : null
   const nowS = Date.now() / 1000
@@ -724,6 +797,12 @@ function HomeSlot({
               <div className="text-[10px] text-yellow-300">
                 +{def.income.toLocaleString('tr')}💰/sn
               </div>
+              {/* Şans Bloğu geri sayım */}
+              {owned?.defId === 'sansblogu' && lbCountdown !== null && (
+                <div className="text-[9px] font-black text-amber-300">
+                  🎰 {lbCountdown}s sonra açılıyor!
+                </div>
+              )}
               {isLocked && isLocal && (
                 <div className="text-[9px] text-green-300">
                   🔒 Kilitli ({Math.ceil(owned!.lockedUntil - nowS)}s)
