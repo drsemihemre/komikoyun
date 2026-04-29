@@ -89,7 +89,7 @@ export default function BrainrotFigure({ def, idle = true, scale = 1 }: Props) {
       <Body def={def} h={bodyHeight} r={bodyRadius} />
 
       {/* Floating disk tabanı — Şans Bloğu'nda yok (flames var) */}
-      {def.shape === 'floating' && def.id !== 'sansblogu' && (
+      {def.shape === 'floating' && def.accessory !== 'lucky-block' && (
         <mesh position={[0, 0.05, 0]}>
           <cylinderGeometry args={[bodyRadius * 0.9, bodyRadius * 0.7, 0.15, 12]} />
           <meshStandardMaterial
@@ -250,8 +250,8 @@ export default function BrainrotFigure({ def, idle = true, scale = 1 }: Props) {
 function Body({ def, h, r }: { def: BrainrotDef; h: number; r: number }) {
   const y = h / 2 + 0.4
 
-  // ─── ŞANS BLOĞU: Mario soru bloğu küpü ───
-  if (def.id === 'sansblogu') {
+  // ─── ŞANS BLOĞU: Mario soru bloğu küpü (tüm rarity varyantları) ───
+  if (def.accessory === 'lucky-block') {
     const side = 1.8
     const cornerX = 0.65
     const cornerY = 0.65
@@ -380,7 +380,7 @@ function HeadWithFace({
   bodyRadius: number
 }) {
   // ─── ŞANS BLOĞU: tek büyük göz + "?" gözbebebi ön yüzde ───
-  if (def.id === 'sansblogu') {
+  if (def.accessory === 'lucky-block') {
     const blockCenterY = h / 2 + 0.4 // = 1.0
     const frontZ = r + 0.05           // = 0.95
     return (

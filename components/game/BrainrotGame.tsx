@@ -8,11 +8,12 @@ import type { Group, Mesh } from 'three'
 import { getPlayerHandle } from '@/lib/playerHandle'
 import { useGameStore } from '@/lib/store'
 import {
-  BRAINROTS,
   RARITY_COLORS,
   RARITY_LABELS,
   getBrainrotDef,
   randomBrainrot,
+  randomBrainrotOfRarity,
+  isLuckyBlock,
   sellPriceFor,
 } from '@/lib/brainrots'
 import { playLaunch, playKo, playPotion } from '@/lib/sounds'
@@ -63,6 +64,45 @@ const HOME_SIZE = 7 // yarı-genişlik (toplam 14x14 platform)
 
 // Local ev konumu (merkez konveyorun güneyi)
 const LOCAL_HOME: [number, number, number] = [0, 0, -28]
+
+// ─── ETKİNLİK SİSTEMİ ─────────────────────────────────────────
+const EVENT_COOLDOWN = 3600   // etkinlikler arası bekleme (1 saat)
+const FIRST_EVENT_DELAY = 300 // ilk etkinlik 5dk sonra
+const EVENT_DURATION = 300    // etkinlik süresi (5 dakika)
+const BOSS_POS: [number, number, number] = [0, 0, -10]
+
+type EventType = 'dragon' | 'dinosaur'
+const EVENT_DEFS: Record<EventType, {
+  name: string
+  maxHP: number
+  attackDmg: number
+  attackRange: number
+  attackInterval: number
+  reward: string
+  rewardName: string
+  color: string
+}> = {
+  dragon: {
+    name: '🐉 Ejderha Etkinliği',
+    maxHP: 150,
+    attackDmg: 5,
+    attackRange: 6,
+    attackInterval: 2.5,
+    reward: 'bebek_ejderha',
+    rewardName: 'Bebek Ejderha',
+    color: '#dc2626',
+  },
+  dinosaur: {
+    name: '🦕 Dinozor Etkinliği',
+    maxHP: 100,
+    attackDmg: 10,
+    attackRange: 12,
+    attackInterval: 3,
+    reward: 'bebek_dinozor',
+    rewardName: 'Bebek Dinozor',
+    color: '#16a34a',
+  },
+}
 
 // Remote ev konumları — merkez etrafında halka
 function remoteHomeOffset(index: number): [number, number] {
@@ -175,13 +215,27 @@ function GameZone() {
   const [mode, setMode] = useState<'classic' | 'tsunami'>('classic')
   const [belt, setBelt] = useState<BeltItem[]>([])
   const [walking, setWalking] = useState<WalkingItem[]>([])
-  const [banner, setBanner] = useState<{ text: string; color: string } | null>(
-    null
-  )
+  const [banner, setBanner] = useState<{ text: string; color: string } | null>(null)
   const lastSpawnRef = useRef(0)
   const earnTickRef = useRef(0)
   const syncTickRef = useRef(0)
   const nickname = useMemo(() => loadNickname() || 'Sen', [])
+
+  // ── Etkinlik state ──
+  const [eventType, setEventType] = useState<EventType | null>(null)
+  const [eventHP, setEventHP] = useState(0)
+  const [eventMaxHP, setEventMaxHP] = useState(0)
+  const [nextEventIn, setNextEventIn] = useState(FIRST_EVENT_DELAY)
+  const [nearMonster, setNearMonster] = useState(false)
+  const eventActiveRef = useRef(false)
+  const eventTypeRef = useRef<EventType | null>(null)
+  const eventHPRef = useRef(0)
+  const eventCountRef = useRef(0)
+  const nextEventAtRef = useRef(FIRST_EVENT_DELAY) // elapsed sn
+  const eventEndAtRef = useRef(Infinity)
+  const lastHitterRef = useRef('')
+  const monsterLastAttackRef = useRef(0)
+  const lastElapsedRef = useRef(0)
 
   const { brainrotCash, brainrotOwned, brainrotBuy, brainrotEarn, brainrotTransform } =
     useGameStore()
@@ -264,6 +318,52 @@ function GameZone() {
     return () => document.removeEventListener('keydown', handler)
   }, [cx, cz])
 
+  // ── Boss saldırı fonksiyonu ──
+  const attackMonster = () => {
+    if (!eventActiveRef.current || !eventTypeRef.current) return
+    const player = getPlayerHandle()
+    const pp = player?.getPos()
+    if (!pp) return
+    const bx = cx + BOSS_POS[0]
+    const bz = cz + BOSS_POS[2]
+    if (Math.hypot(pp.x - bx, pp.z - bz) > 8) return
+
+    const { currentWeapon } = useGameStore.getState()
+    const dmg = currentWeapon === 'fist' ? 1 : 3
+    const newHP = Math.max(0, eventHPRef.current - dmg)
+    eventHPRef.current = newHP
+    setEventHP(newHP)
+    lastHitterRef.current = nickname
+
+    if (newHP <= 0) {
+      // Boss öldürüldü!
+      const type = eventTypeRef.current
+      const def = EVENT_DEFS[type]
+      const winner = lastHitterRef.current || nickname
+      eventActiveRef.current = false
+      eventTypeRef.current = null
+      setEventType(null)
+      setEventHP(0)
+      nextEventAtRef.current = lastElapsedRef.current + EVENT_COOLDOWN
+      setNextEventIn(EVENT_COOLDOWN)
+      useGameStore.getState().brainrotReceiveStolen(def.reward)
+      setBanner({ text: `🏆 ${winner} → ${def.rewardName} kazandı!`, color: def.color })
+      playPotion('grow')
+      setTimeout(() => setBanner(null), 6000)
+    }
+  }
+
+  // ── F tuşu: Boss saldırısı ──
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.key !== 'f' && e.key !== 'F') || e.repeat) return
+      attackMonster()
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cx, cz, nickname])
+
   // Spawn + income + server sync loop
   useFrame((state) => {
     const t = state.clock.elapsedTime
@@ -281,51 +381,99 @@ function GameZone() {
       // def null ise konveyor boş geçti (%15)
     }
 
-    // Pasif gelir + Şans Bloğu dönüşüm kontrolü
+    // Pasif gelir + Şans Bloğu + Etkinlik zamanlayıcısı (saniyede 1 kez)
     if (t - earnTickRef.current > 1) {
       earnTickRef.current = t
+      lastElapsedRef.current = t
       const storeState = useGameStore.getState()
+
+      // Pasif gelir
       const totalIncome = storeState.brainrotOwned.reduce((sum, o) => {
         const def = getBrainrotDef(o.defId)
         return sum + (def?.income ?? 0)
       }, 0)
       if (totalIncome > 0) brainrotEarn(totalIncome)
 
-      // ── Şans Bloğu: 60 saniye dolunca dönüştür ──
+      // ── Şans Bloğu: 60 saniye dolunca aynı rarity'den brainrot aç ──
       for (const owned of storeState.brainrotOwned) {
-        if (owned.defId !== 'sansblogu') continue
+        if (!isLuckyBlock(owned.defId)) continue
         const now = Date.now()
         let placedAt = luckyTimersRef.current[owned.slotIdx]
         if (!placedAt) {
-          // Sayfa yenilemede başla
           placedAt = now
           luckyTimersRef.current[owned.slotIdx] = now
           setLuckyTimers((prev) => ({ ...prev, [owned.slotIdx]: now }))
           continue
         }
-        const elapsed = (now - placedAt) / 1000
-        if (elapsed >= 60) {
-          // Aynı rarity'den rastgele bir brainrot seç (Şans Bloğu hariç)
-          const sansDef = getBrainrotDef('sansblogu')
-          const candidates = BRAINROTS.filter(
-            (b) => b.rarity === sansDef?.rarity && b.id !== 'sansblogu'
-          )
-          if (candidates.length > 0) {
-            const revealed = candidates[Math.floor(Math.random() * candidates.length)]
-            // Zamanlayıcıyı temizle
-            delete luckyTimersRef.current[owned.slotIdx]
-            setLuckyTimers((prev) => {
-              const next = { ...prev }
-              delete next[owned.slotIdx]
-              return next
-            })
-            storeState.brainrotTransform(owned.slotIdx, revealed.id)
-            setBanner({
-              text: `🎰 Şans Bloğu açıldı! → ${revealed.name} çıktı!`,
-              color: '#f59e0b',
-            })
-            playPotion('grow')
-            setTimeout(() => setBanner(null), 5000)
+        if ((now - placedAt) / 1000 >= 60) {
+          const lbDef = getBrainrotDef(owned.defId)
+          if (!lbDef) continue
+          const revealed = randomBrainrotOfRarity(lbDef.rarity)
+          if (!revealed) continue
+          delete luckyTimersRef.current[owned.slotIdx]
+          setLuckyTimers((prev) => { const n = { ...prev }; delete n[owned.slotIdx]; return n })
+          storeState.brainrotTransform(owned.slotIdx, revealed.id)
+          setBanner({ text: `🎰 ${lbDef.name} açıldı! → ${revealed.name} çıktı!`, color: '#f59e0b' })
+          playPotion('grow')
+          setTimeout(() => setBanner(null), 5000)
+        }
+      }
+
+      // ── Etkinlik zamanlayıcısı (her saniye güncelle) ──
+      if (!eventActiveRef.current) {
+        const remaining = Math.ceil(nextEventAtRef.current - t)
+        setNextEventIn(Math.max(0, remaining))
+        if (t >= nextEventAtRef.current) {
+          // Etkinliği başlat
+          const type: EventType = eventCountRef.current % 2 === 0 ? 'dragon' : 'dinosaur'
+          eventCountRef.current++
+          const def = EVENT_DEFS[type]
+          eventHPRef.current = def.maxHP
+          eventTypeRef.current = type
+          eventActiveRef.current = true
+          eventEndAtRef.current = t + EVENT_DURATION
+          lastHitterRef.current = ''
+          monsterLastAttackRef.current = t
+          setEventType(type)
+          setEventHP(def.maxHP)
+          setEventMaxHP(def.maxHP)
+          setBanner({ text: `⚔️ ${def.name} başladı! F ile saldır!`, color: def.color })
+          setTimeout(() => setBanner(null), 4000)
+        }
+      } else if (eventTypeRef.current) {
+        // Etkinlik süresi doldu mu?
+        if (t > eventEndAtRef.current) {
+          eventActiveRef.current = false
+          eventTypeRef.current = null
+          setEventType(null)
+          nextEventAtRef.current = t + EVENT_COOLDOWN
+          setNextEventIn(EVENT_COOLDOWN)
+          setBanner({ text: '❌ Etkinlik bitti — canavar kaçtı!', color: '#6b7280' })
+          setTimeout(() => setBanner(null), 3000)
+        } else {
+          // Kalan süreyi nextEventIn ile göster (etkinlik süresi sayacı)
+          const remaining = Math.ceil(eventEndAtRef.current - t)
+          setNextEventIn(Math.max(0, remaining))
+        }
+      }
+    }
+
+    // ── Boss saldırısı (her frame, eventActiveRef varsa) ──
+    if (eventActiveRef.current && eventTypeRef.current) {
+      const def = EVENT_DEFS[eventTypeRef.current]
+      if (t - monsterLastAttackRef.current > def.attackInterval) {
+        const player = getPlayerHandle()
+        const pp = player?.getPos()
+        if (pp) {
+          const bx = cx + BOSS_POS[0]
+          const bz = cz + BOSS_POS[2]
+          const dist = Math.hypot(pp.x - bx, pp.z - bz)
+          const near = dist < 8
+          if (near !== nearMonster) setNearMonster(near)
+          if (dist < def.attackRange) {
+            monsterLastAttackRef.current = t
+            player?.takeHit(def.attackDmg, [(pp.x - bx) * 3, 5, (pp.z - bz) * 3])
+            playKo()
           }
         }
       }
@@ -528,9 +676,35 @@ function GameZone() {
       {!isMobile && (
         <Html position={[0, 2, -12]} center distanceFactor={16} zIndexRange={[10, 0]}>
           <div className="pointer-events-none whitespace-nowrap rounded-lg bg-black/70 px-3 py-1.5 text-xs font-bold text-white shadow">
-            💡 Slot üzerine gel + <kbd className="rounded bg-white/20 px-1">Z</kbd> = SAT (alım fiyatının %50'si)
+            💡 Z = SAT &nbsp;|&nbsp; F = Boss Saldır
           </div>
         </Html>
+      )}
+
+      {/* ═══ ETKİNLİK PANELİ (sağ kenarda) ═══ */}
+      <EventPanel
+        eventType={eventType}
+        eventHP={eventHP}
+        eventMaxHP={eventMaxHP}
+        nextEventIn={nextEventIn}
+      />
+
+      {/* ═══ BOSS CANAVARI ═══ */}
+      {eventType && (
+        <group position={BOSS_POS}>
+          <BossMonster type={eventType} hp={eventHP} maxHP={eventMaxHP} />
+          {/* Mobile saldırı butonu */}
+          {isMobile && nearMonster && (
+            <Html position={[0, 7, 0]} center distanceFactor={14} zIndexRange={[30, 0]}>
+              <button
+                onPointerDown={(e) => { e.stopPropagation(); attackMonster() }}
+                className="pointer-events-auto rounded-2xl bg-red-600 px-6 py-3 text-xl font-black text-white shadow-2xl ring-4 ring-red-300 active:scale-95"
+              >
+                ⚔️ SALDIR!
+              </button>
+            </Html>
+          )}
+        </group>
       )}
     </group>
   )
@@ -871,6 +1045,307 @@ function HomeSlot({
           )}
         </group>
       )}
+    </group>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ETKİNLİK PANELİ — sağ kenarda her zaman görünür
+// ═══════════════════════════════════════════════════════════════
+function EventPanel({
+  eventType,
+  eventHP,
+  eventMaxHP,
+  nextEventIn,
+}: {
+  eventType: EventType | null
+  eventHP: number
+  eventMaxHP: number
+  nextEventIn: number
+}) {
+  const def = eventType ? EVENT_DEFS[eventType] : null
+  const fmt = (s: number) => {
+    const h = Math.floor(s / 3600)
+    const m = Math.floor((s % 3600) / 60)
+    const sec = s % 60
+    if (h > 0) return `${h}s ${m}dk`
+    if (m > 0) return `${m}dk ${sec}sn`
+    return `${sec}sn`
+  }
+
+  return (
+    <group position={[38, 6, 0]}>
+      {/* Panel levhası */}
+      <mesh castShadow>
+        <boxGeometry args={[9, 8, 0.4]} />
+        <meshStandardMaterial color="#0f0a1e" emissive="#0f0a1e" emissiveIntensity={0.4} />
+      </mesh>
+      <Html position={[0, 0, 0.25]} center distanceFactor={14} zIndexRange={[10, 0]}>
+        <div className="pointer-events-none w-52 rounded-2xl bg-black/92 p-3 shadow-2xl ring-1 ring-white/10">
+          {/* Başlık */}
+          <div className="mb-2 text-center text-xs font-black uppercase tracking-widest text-yellow-400">
+            ⚔️ ETKİNLİK
+          </div>
+          {def && eventType ? (
+            <>
+              <div
+                className="mb-2 rounded-lg py-1 text-center text-sm font-black text-white"
+                style={{ background: def.color + '44', border: `1px solid ${def.color}` }}
+              >
+                {def.name}
+              </div>
+              {/* HP bar */}
+              <div className="mb-1 flex justify-between text-[10px] text-gray-300">
+                <span>❤️ Can</span>
+                <span className="font-bold text-red-400">{eventHP} / {eventMaxHP}</span>
+              </div>
+              <div className="mb-2 h-3 w-full overflow-hidden rounded-full bg-gray-800">
+                <div
+                  className="h-full rounded-full transition-all duration-300"
+                  style={{
+                    width: `${(eventHP / eventMaxHP) * 100}%`,
+                    background: `linear-gradient(90deg, ${def.color}, #ff6b6b)`,
+                    boxShadow: `0 0 8px ${def.color}`,
+                  }}
+                />
+              </div>
+              {/* Kalan süre */}
+              <div className="mb-2 text-center text-xs text-amber-300 font-bold">
+                ⏱️ {fmt(nextEventIn)} kaldı
+              </div>
+              {/* Ödül */}
+              <div className="rounded-lg bg-yellow-500/20 py-1 text-center text-[10px] text-yellow-300 ring-1 ring-yellow-500/30">
+                🏆 Ödül: {def.rewardName}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="mb-2 text-center text-xs text-gray-400">Sıradaki Etkinlik</div>
+              <div className="mb-2 text-center text-2xl font-black text-white">{fmt(nextEventIn)}</div>
+              <div className="mb-1 text-center text-[10px] text-gray-500">Yaklaşan etkinlikler:</div>
+              <div className="flex justify-around text-[10px]">
+                <span className="text-red-400">🐉 Ejderha<br />HP: 150</span>
+                <span className="text-green-400">🦕 Dinozor<br />HP: 100</span>
+              </div>
+            </>
+          )}
+          {/* Saldırı bilgisi */}
+          <div className="mt-2 border-t border-white/10 pt-2 text-center text-[9px] text-gray-500">
+            🥊 Yumruk: 1 hasar &nbsp;|&nbsp; ⚔️ Silah: 3 hasar<br />
+            <span className="text-yellow-500 font-bold">F</span> tuşu ile saldır
+          </div>
+        </div>
+      </Html>
+    </group>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// BOSS CANAVARI — 3D model + HP bar
+// ═══════════════════════════════════════════════════════════════
+function BossMonster({
+  type,
+  hp,
+  maxHP,
+}: {
+  type: EventType
+  hp: number
+  maxHP: number
+}) {
+  const groupRef = useRef<Group>(null)
+  const def = EVENT_DEFS[type]
+
+  useFrame((state) => {
+    if (!groupRef.current) return
+    const t = state.clock.elapsedTime
+    groupRef.current.position.y = Math.sin(t * 1.2) * 0.4
+    groupRef.current.rotation.y = Math.sin(t * 0.5) * 0.35
+  })
+
+  return (
+    <>
+      {/* HP bar overhead */}
+      <Html position={[0, 9, 0]} center distanceFactor={20} zIndexRange={[20, 0]}>
+        <div className="pointer-events-none w-52 rounded-2xl bg-black/92 p-2 text-center shadow-2xl ring-2"
+          style={{ borderColor: def.color }}>
+          <div className="mb-1 font-black text-white text-base">{def.name}</div>
+          <div className="mb-1 text-xs text-red-300 font-bold">❤️ {hp} / {maxHP}</div>
+          <div className="h-4 w-full overflow-hidden rounded-full bg-gray-800">
+            <div
+              className="h-full rounded-full transition-all duration-200"
+              style={{
+                width: `${(hp / maxHP) * 100}%`,
+                background: `linear-gradient(90deg, ${def.color}, #ff6b6b)`,
+                boxShadow: `0 0 12px ${def.color}`,
+              }}
+            />
+          </div>
+        </div>
+      </Html>
+
+      {/* Boss gövdesi */}
+      <group ref={groupRef}>
+        {type === 'dragon' ? (
+          <DragonBoss color={def.color} />
+        ) : (
+          <DinosaurBoss color={def.color} />
+        )}
+      </group>
+
+      {/* Zemin gölge dairesi */}
+      <mesh position={[0, 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[3, 32]} />
+        <meshBasicMaterial color={def.color} transparent opacity={0.18} />
+      </mesh>
+    </>
+  )
+}
+
+// Ejderha modeli — kırmızı, kanatlı, büyük
+function DragonBoss({ color }: { color: string }) {
+  return (
+    <group scale={2.8}>
+      {/* Gövde */}
+      <mesh position={[0, 1.3, 0]} castShadow>
+        <capsuleGeometry args={[0.75, 1.0, 8, 16]} />
+        <meshStandardMaterial color={color} roughness={0.5} metalness={0.3} emissive={color} emissiveIntensity={0.15} />
+      </mesh>
+      {/* Boyun */}
+      <mesh position={[0, 2.4, 0.3]} rotation={[0.5, 0, 0]} castShadow>
+        <capsuleGeometry args={[0.4, 0.7, 6, 12]} />
+        <meshStandardMaterial color={color} roughness={0.5} />
+      </mesh>
+      {/* Kafa */}
+      <mesh position={[0, 3.0, 0.7]} castShadow>
+        <sphereGeometry args={[0.6, 16, 14]} />
+        <meshStandardMaterial color={color} roughness={0.5} emissive={color} emissiveIntensity={0.2} />
+      </mesh>
+      {/* Gözler */}
+      <mesh position={[0.22, 3.1, 1.12]}>
+        <sphereGeometry args={[0.14, 10, 10]} />
+        <meshBasicMaterial color="#fef08a" />
+      </mesh>
+      <mesh position={[-0.22, 3.1, 1.12]}>
+        <sphereGeometry args={[0.14, 10, 10]} />
+        <meshBasicMaterial color="#fef08a" />
+      </mesh>
+      <mesh position={[0.24, 3.12, 1.2]}>
+        <sphereGeometry args={[0.07, 8, 8]} />
+        <meshBasicMaterial color="#000" />
+      </mesh>
+      <mesh position={[-0.24, 3.12, 1.2]}>
+        <sphereGeometry args={[0.07, 8, 8]} />
+        <meshBasicMaterial color="#000" />
+      </mesh>
+      {/* Boynuzlar */}
+      <mesh position={[0.3, 3.5, 0.5]} rotation={[-0.3, 0.3, 0.4]} castShadow>
+        <coneGeometry args={[0.1, 0.6, 6]} />
+        <meshStandardMaterial color="#1a1a1a" />
+      </mesh>
+      <mesh position={[-0.3, 3.5, 0.5]} rotation={[-0.3, -0.3, -0.4]} castShadow>
+        <coneGeometry args={[0.1, 0.6, 6]} />
+        <meshStandardMaterial color="#1a1a1a" />
+      </mesh>
+      {/* Sol kanat */}
+      <mesh position={[1.6, 1.7, -0.1]} rotation={[0.2, -0.2, -0.35]} castShadow>
+        <coneGeometry args={[1.1, 2.2, 4, 1, true]} />
+        <meshStandardMaterial color="#991b1b" side={2} transparent opacity={0.85} />
+      </mesh>
+      {/* Sağ kanat */}
+      <mesh position={[-1.6, 1.7, -0.1]} rotation={[0.2, 0.2, 0.35]} castShadow>
+        <coneGeometry args={[1.1, 2.2, 4, 1, true]} />
+        <meshStandardMaterial color="#991b1b" side={2} transparent opacity={0.85} />
+      </mesh>
+      {/* Kuyruk */}
+      {[0, 1, 2, 3].map((i) => (
+        <mesh key={`dt${i}`} position={[0, 0.7 - i * 0.18, -0.6 - i * 0.35]} rotation={[-0.35 - i * 0.1, 0, 0]} castShadow>
+          <sphereGeometry args={[0.45 - i * 0.06, 10, 8]} />
+          <meshStandardMaterial color={color} roughness={0.6} />
+        </mesh>
+      ))}
+      {/* Ön bacaklar */}
+      <mesh position={[0.55, 0.5, 0.4]} castShadow>
+        <cylinderGeometry args={[0.2, 0.25, 0.9, 10]} />
+        <meshStandardMaterial color={color} roughness={0.6} />
+      </mesh>
+      <mesh position={[-0.55, 0.5, 0.4]} castShadow>
+        <cylinderGeometry args={[0.2, 0.25, 0.9, 10]} />
+        <meshStandardMaterial color={color} roughness={0.6} />
+      </mesh>
+      {/* Arka bacaklar */}
+      <mesh position={[0.55, 0.5, -0.4]} castShadow>
+        <cylinderGeometry args={[0.22, 0.28, 0.9, 10]} />
+        <meshStandardMaterial color={color} roughness={0.6} />
+      </mesh>
+      <mesh position={[-0.55, 0.5, -0.4]} castShadow>
+        <cylinderGeometry args={[0.22, 0.28, 0.9, 10]} />
+        <meshStandardMaterial color={color} roughness={0.6} />
+      </mesh>
+      {/* Ağız ışıkı */}
+      <pointLight position={[0, 3.0, 1.2]} intensity={2} color="#ff6600" distance={6} />
+    </group>
+  )
+}
+
+// Dinozor modeli — yeşil, dev, uzun boyun
+function DinosaurBoss({ color }: { color: string }) {
+  return (
+    <group scale={3.0}>
+      {/* Gövde */}
+      <mesh position={[0, 0.9, 0]} castShadow>
+        <boxGeometry args={[1.4, 1.0, 2.0]} />
+        <meshStandardMaterial color={color} roughness={0.6} emissive={color} emissiveIntensity={0.1} />
+      </mesh>
+      {/* Uzun boyun (5 parça) */}
+      {[0, 1, 2, 3, 4].map((i) => (
+        <mesh key={`dn${i}`} position={[0, 1.5 + i * 0.5, 0.6 + i * 0.18]} rotation={[0.4 + i * 0.06, 0, 0]} castShadow>
+          <cylinderGeometry args={[0.32 - i * 0.02, 0.35 - i * 0.02, 0.55, 10]} />
+          <meshStandardMaterial color={color} roughness={0.6} />
+        </mesh>
+      ))}
+      {/* Kafa */}
+      <mesh position={[0, 4.1, 1.8]} castShadow>
+        <boxGeometry args={[0.75, 0.55, 1.1]} />
+        <meshStandardMaterial color={color} roughness={0.5} emissive={color} emissiveIntensity={0.15} />
+      </mesh>
+      {/* Gözler */}
+      <mesh position={[0.3, 4.3, 2.2]}>
+        <sphereGeometry args={[0.15, 10, 10]} />
+        <meshBasicMaterial color="#fef9c3" />
+      </mesh>
+      <mesh position={[-0.3, 4.3, 2.2]}>
+        <sphereGeometry args={[0.15, 10, 10]} />
+        <meshBasicMaterial color="#fef9c3" />
+      </mesh>
+      <mesh position={[0.32, 4.32, 2.3]}>
+        <sphereGeometry args={[0.07, 8, 8]} />
+        <meshBasicMaterial color="#000" />
+      </mesh>
+      <mesh position={[-0.32, 4.32, 2.3]}>
+        <sphereGeometry args={[0.07, 8, 8]} />
+        <meshBasicMaterial color="#000" />
+      </mesh>
+      {/* Bacaklar */}
+      {[[0.55, 0.5], [-0.55, 0.5], [0.55, -0.5], [-0.55, -0.5]].map(([lx, lz], i) => (
+        <mesh key={`dl${i}`} position={[lx, 0, lz]} castShadow>
+          <cylinderGeometry args={[0.22, 0.28, 1.0, 10]} />
+          <meshStandardMaterial color={color} roughness={0.7} />
+        </mesh>
+      ))}
+      {/* Kuyruk */}
+      {[0, 1, 2, 3].map((i) => (
+        <mesh key={`dkt${i}`} position={[0, 0.8 - i * 0.1, -0.8 - i * 0.4]} rotation={[0.3 + i * 0.1, 0, 0]} castShadow>
+          <sphereGeometry args={[0.5 - i * 0.08, 10, 8]} />
+          <meshStandardMaterial color={color} roughness={0.7} />
+        </mesh>
+      ))}
+      {/* Sırt dikenleri */}
+      {[0, 1, 2, 3, 4].map((i) => (
+        <mesh key={`ds${i}`} position={[0, 1.5 + i * 0.05, -0.5 + i * 0.3]} rotation={[0, 0, 0]} castShadow>
+          <coneGeometry args={[0.1, 0.45 - i * 0.06, 6]} />
+          <meshStandardMaterial color="#15803d" roughness={0.6} />
+        </mesh>
+      ))}
     </group>
   )
 }
