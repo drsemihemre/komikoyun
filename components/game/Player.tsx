@@ -610,13 +610,20 @@ export default function Player() {
           true
         )
       } else {
-        // 3rd person: input-based yaw, move in input direction
+        // 3. şahıs — KAMERA-RELATİF hareket (dokunmatik/WASD ekrana göre tutarlı)
+        // Kamera orbit açısı mouseYaw; kameranın baktığı "ileri" = (-sin, -cos)
+        const camYaw = mouseYaw.current
+        const sinC = Math.sin(camYaw)
+        const cosC = Math.cos(camYaw)
+        // ileri (W / joystick yukarı, si.z<0) → kamera-ileri; sağ (D, si.x>0) → kamera-sağı
+        const moveX = -si.z * -sinC + si.x * cosC
+        const moveZ = -si.z * -cosC + si.x * -sinC
         body.current.setLinvel(
-          { x: si.x * speed, y: linvel.y, z: si.z * speed },
+          { x: moveX * speed, y: linvel.y, z: moveZ * speed },
           true
         )
         if (raw.lengthSq() > 0.01) {
-          targetYaw.current = Math.atan2(raw.x, raw.z)
+          targetYaw.current = Math.atan2(moveX, moveZ) // karakter gittiği yöne döner
         }
         currentYaw.current = lerpAngle(
           currentYaw.current,
@@ -839,7 +846,12 @@ export default function Player() {
       // 3. şahıs — mouseYaw/mousePitch ile orbit
       // Otomatik takip: yürüyünce kamera arkaya süzülür (kullanıcı fare kaydırmıyorsa)
       const sinceMouse = performance.now() - lastMouseMoveT.current
-      if (moveMag > 0.08 && sinceMouse > 500) {
+      // Auto-follow YALNIZ neredeyse tam-ileri harekette çalışır. Yan/çapraz girişte
+      // kamera-relatif hareket + auto-follow matematiksel olarak kararsızdır (kamera
+      // "hareketin arkasına" yetişmeye çalışırken sonsuz döner = spin). Yana giderken
+      // kamera sabit kalır; oyuncu fare (masaüstü) / sağ-yarı sürükleme (mobil) ile döndürür.
+      const nearPureForward = si.z < -0.05 && Math.abs(si.x) < 0.06
+      if (moveMag > 0.08 && sinceMouse > 500 && nearPureForward) {
         // Hedef: mouseYaw = currentYaw + π (karakter'in arkası)
         const targetCamYaw = currentYaw.current + Math.PI
         mouseYaw.current = lerpAngle(

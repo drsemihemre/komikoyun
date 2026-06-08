@@ -3,7 +3,8 @@
 import { useEffect, useRef } from 'react'
 import { useGameStore } from '@/lib/store'
 
-// FPV modunda mobile'da sağa sola/yukarı bakabilmek için touch bölgesi.
+// Mobile'da kamerayı döndürmek için sağ-yarı touch bölgesi (HER İKİ modda).
+// 3. şahısta auto-follow yalnız tam-ileri çalıştığından, yana/etrafa bakmak için gerekli.
 // mouseYaw/mousePitch yerine custom event tetikler; Player tarafı dinler.
 
 const SENS = 0.006
@@ -11,13 +12,11 @@ const SENS = 0.006
 export default function MobileLookZone() {
   const zoneRef = useRef<HTMLDivElement>(null)
   const isMobile = useGameStore((s) => s.isMobile)
-  const cameraMode = useGameStore((s) => s.cameraMode)
   const activeTouchId = useRef<number | null>(null)
   const lastPos = useRef({ x: 0, y: 0 })
 
   useEffect(() => {
     if (!isMobile) return
-    if (cameraMode !== 'first') return
     const el = zoneRef.current
     if (!el) return
 
@@ -67,9 +66,9 @@ export default function MobileLookZone() {
       el.removeEventListener('touchcancel', onEnd)
       activeTouchId.current = null
     }
-  }, [isMobile, cameraMode])
+  }, [isMobile])
 
-  if (!isMobile || cameraMode !== 'first') return null
+  if (!isMobile) return null
 
   return (
     <div

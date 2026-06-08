@@ -3,7 +3,46 @@
 
 let ctx: AudioContext | null = null
 let masterGain: GainNode | null = null
+let compressor: DynamicsCompressorNode | null = null
+let reverbBus: ConvolverNode | null = null
 let muted = false
+
+// Kısa prosedürel reverb impulse (oda hissi) — tek buffer, tüm SFX paylaşır
+function makeImpulse(c: AudioContext, seconds: number, decay: number): AudioBuffer {
+  const rate = c.sampleRate
+  const len = Math.max(1, Math.floor(seconds * rate))
+  const buf = c.createBuffer(2, len, rate)
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch)
+    for (let i = 0; i < len; i++) {
+      d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay)
+    }
+  }
+  return buf
+}
+
+// Bir sesi paylaşımlı reverb bus'ına gönder (mekansal his, sabit CPU)
+function sendReverb(c: AudioContext, src: AudioNode, amount: number) {
+  if (!reverbBus) return
+  const s = c.createGain()
+  s.gain.value = amount
+  src.connect(s)
+  s.connect(reverbBus)
+}
+
+// Voice-throttle — aynı sesin çok hızlı tekrarında düğüm yığılmasını önle
+const lastPlayed: Record<string, number> = {}
+function throttled(key: string, ms: number): boolean {
+  const now = typeof performance !== 'undefined' ? performance.now() : 0
+  if (lastPlayed[key] && now - lastPlayed[key] < ms) return true
+  lastPlayed[key] = now
+  return false
+}
+
+// ±jitter: deterministik seslerin "robotik tekrar" hissini kaldırır
+function jit(v: number, pct: number): number {
+  return v * (1 + (Math.random() * 2 - 1) * pct)
+}
 
 function getCtx(): AudioContext | null {
   if (typeof window === 'undefined') return null
@@ -16,7 +55,24 @@ function getCtx(): AudioContext | null {
       ctx = new AC()
       masterGain = ctx.createGain()
       masterGain.gain.value = 0.55
-      masterGain.connect(ctx.destination)
+      // Master limiter/compressor — karışımı yumuşatır, clipping/distortion önler
+      compressor = ctx.createDynamicsCompressor()
+      compressor.threshold.value = -10
+      compressor.knee.value = 6
+      compressor.ratio.value = 6
+      compressor.attack.value = 0.003
+      compressor.release.value = 0.15
+      masterGain.connect(compressor)
+      compressor.connect(ctx.destination)
+      // Paylaşımlı reverb send bus → compressor
+      reverbBus = ctx.createConvolver()
+      reverbBus.buffer = makeImpulse(ctx, 0.6, 2.4)
+      const reverbWet = ctx.createGain()
+      reverbWet.gain.value = 0.5
+      reverbBus.connect(reverbWet)
+      // Wet kuyruk da masterGain'den geçsin → mute ve ses seviyesi reverb'e de uygulanır
+      // (loop yok: masterGain yalnız compressor'a gider, reverbBus'a geri beslenmez)
+      reverbWet.connect(masterGain)
     } catch {
       return null
     }
@@ -59,14 +115,25 @@ function connectMaster(c: AudioContext, src: AudioNode) {
 export function playJump() {
   const c = getCtx()
   if (!c || muted) return
+  const top = jit(680, 0.06)
+  // Ana triangle sweep
   const osc = c.createOscillator()
   osc.type = 'triangle'
-  const g = envelope(c, masterGain ?? c.destination, 0.005, 0.18, 0.25)
+  const g = envelope(c, masterGain ?? c.destination, 0.005, jit(0.18, 0.12), 0.24)
   osc.connect(g)
-  osc.frequency.setValueAtTime(220, c.currentTime)
-  osc.frequency.exponentialRampToValueAtTime(680, c.currentTime + 0.12)
+  osc.frequency.setValueAtTime(jit(220, 0.05), c.currentTime)
+  osc.frequency.exponentialRampToValueAtTime(top, c.currentTime + 0.12)
   osc.start()
-  osc.stop(c.currentTime + 0.2)
+  osc.stop(c.currentTime + 0.22)
+  // Alt sine 'sub' katman — daha dolu his
+  const sub = c.createOscillator()
+  sub.type = 'sine'
+  const sg = envelope(c, masterGain ?? c.destination, 0.005, 0.14, 0.12)
+  sub.connect(sg)
+  sub.frequency.setValueAtTime(jit(140, 0.05), c.currentTime)
+  sub.frequency.exponentialRampToValueAtTime(top * 0.5, c.currentTime + 0.1)
+  sub.start()
+  sub.stop(c.currentTime + 0.18)
 }
 
 export function playLand(impactVel: number) {
@@ -93,12 +160,14 @@ export function playLand(impactVel: number) {
   )
   src.connect(filter)
   filter.connect(g)
+  sendReverb(c, g, 0.1 + strength * 0.15) // sert iniş = daha çok yankı
   src.start()
 }
 
 export function playHit() {
   const c = getCtx()
   if (!c || muted) return
+  if (throttled('hit', 28)) return // hızlı combat'ta düğüm yığılmasını önle
   // Slap: short noise + pitched tone
   const buffer = c.createBuffer(1, Math.floor(c.sampleRate * 0.08), c.sampleRate)
   const data = buffer.getChannelData(0)
@@ -109,17 +178,18 @@ export function playHit() {
   src.buffer = buffer
   const filter = c.createBiquadFilter()
   filter.type = 'bandpass'
-  filter.frequency.value = 800
+  filter.frequency.value = jit(800, 0.1)
   filter.Q.value = 2
   const g = envelope(c, masterGain ?? c.destination, 0.002, 0.08, 0.45)
   src.connect(filter)
   filter.connect(g)
+  sendReverb(c, g, 0.12)
   src.start()
 
   // Pitched pop
   const osc = c.createOscillator()
   osc.type = 'sine'
-  osc.frequency.setValueAtTime(420, c.currentTime)
+  osc.frequency.setValueAtTime(jit(420, 0.08), c.currentTime)
   osc.frequency.exponentialRampToValueAtTime(140, c.currentTime + 0.1)
   const og = envelope(c, masterGain ?? c.destination, 0.001, 0.1, 0.2)
   osc.connect(og)
@@ -185,24 +255,36 @@ export function playLaunch() {
 export function playKo() {
   const c = getCtx()
   if (!c || muted) return
+  // Ana square düşüş
   const osc = c.createOscillator()
   osc.type = 'square'
-  const g = envelope(c, masterGain ?? c.destination, 0.005, 0.35, 0.25)
+  const g = envelope(c, masterGain ?? c.destination, 0.005, jit(0.35, 0.1), 0.24)
   osc.connect(g)
-  osc.frequency.setValueAtTime(600, c.currentTime)
+  osc.frequency.setValueAtTime(jit(600, 0.05), c.currentTime)
   osc.frequency.exponentialRampToValueAtTime(120, c.currentTime + 0.3)
+  sendReverb(c, g, 0.25) // KO mekansal/güçlü duyulsun
   osc.start()
   osc.stop(c.currentTime + 0.35)
+  // Alt sine 'thud' katman
+  const sub = c.createOscillator()
+  sub.type = 'sine'
+  const sg = envelope(c, masterGain ?? c.destination, 0.004, 0.22, 0.22)
+  sub.connect(sg)
+  sub.frequency.setValueAtTime(jit(160, 0.06), c.currentTime)
+  sub.frequency.exponentialRampToValueAtTime(50, c.currentTime + 0.2)
+  sub.start()
+  sub.stop(c.currentTime + 0.24)
 }
 
 export function playDamage() {
   const c = getCtx()
   if (!c || muted) return
+  if (throttled('damage', 30)) return
   const osc = c.createOscillator()
   osc.type = 'sawtooth'
-  const g = envelope(c, masterGain ?? c.destination, 0.002, 0.15, 0.3)
+  const g = envelope(c, masterGain ?? c.destination, 0.002, jit(0.15, 0.12), 0.3)
   osc.connect(g)
-  osc.frequency.setValueAtTime(180, c.currentTime)
+  osc.frequency.setValueAtTime(jit(180, 0.06), c.currentTime)
   osc.frequency.exponentialRampToValueAtTime(80, c.currentTime + 0.15)
   osc.start()
   osc.stop(c.currentTime + 0.18)

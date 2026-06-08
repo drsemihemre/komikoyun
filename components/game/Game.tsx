@@ -62,6 +62,10 @@ export default function Game() {
   const togglePause = useGameStore((s) => s.togglePause)
   const [dpr, setDpr] = useState<[number, number]>([1, 1.5])
   const [mobile, setMobileLocal] = useState(false)
+
+  // Gölge çözünürlüğü sabit (runtime'da değiştirmek three'de shadow map'i yeniden
+  // boyutlandırmadığı için kalibrasyonu bozuyordu). Düşük FPS'te dpr düşürülür.
+  const shadowSize = mobile ? 1024 : 2048
   const lightRef = useRef<DirectionalLight>(null)
   const ambientRef = useRef<AmbientLight>(null)
 
@@ -114,7 +118,7 @@ export default function Game() {
           camera={{ position: [0, 8, 16], fov: 60 }}
           dpr={dpr}
           gl={{
-            antialias: true,
+            antialias: false, // SMAA postprocessing zaten AA sağlıyor — çift AA maliyeti yok
             powerPreference: 'high-performance',
             toneMapping: ACESFilmicToneMapping,
             toneMappingExposure: 1.15,
@@ -134,7 +138,7 @@ export default function Game() {
             position={[20, 35, 18]}
             intensity={1.4}
             castShadow
-            shadow-mapSize={mobile ? [1024, 1024] : [2048, 2048]}
+            shadow-mapSize={[shadowSize, shadowSize]}
             shadow-camera-left={-40}
             shadow-camera-right={40}
             shadow-camera-top={40}

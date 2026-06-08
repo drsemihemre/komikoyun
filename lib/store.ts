@@ -15,13 +15,11 @@ type Vec2 = { x: number; y: number }
 export type PotionType = 'grow' | 'shrink' | 'speed' | 'slow'
 export type CameraMode = 'third' | 'first'
 
-// ── Kaçırılan Akraba — Bulmaca modu ilerlemesi ──
+// ── Kaçırılan Akraba — Bulmaca modu ilerlemesi (çok katlı) ──
 export type PuzzleProgress = {
-  keys: string[] // toplanan anahtar renkleri: 'red' | 'blue' | 'green' | 'yellow'
-  wrench: boolean // İngiliz anahtarı alındı mı
-  stairs: boolean // vidalı kapak açıldı → merdiven yükseldi mi
-  drawers: string[] // açılan çekmece id'leri
-  cabinet: boolean // dolap itildi mi (arkasındaki anahtar göründü)
+  keys: string[] // kafes anahtarları: 'red' | 'blue' | 'green' | 'yellow'
+  items: string[] // toplanan aletler/eşyalar: 'wrench' | 'crowbar' | 'slipper'
+  done: string[] // tamamlanan adımlar: 'crate' | 'w1' | 'w2' | 'wardrobe' | 'hatch' | 'neighbor'
   solved: boolean // akraba kurtarıldı mı
 }
 export const PUZZLE_KEY_COLORS = ['red', 'blue', 'green', 'yellow'] as const
@@ -141,11 +139,9 @@ type GameState = {
   // Bulmaca aksiyonları
   setPuzzleActive: (b: boolean) => void
   setPuzzlePrompt: (s: string | null) => void
-  puzzleCollectKey: (color: string) => boolean
-  puzzleCollectWrench: () => void
-  puzzleOpenDrawer: (id: string) => void
-  puzzleMoveCabinet: () => void
-  puzzleOpenStairs: () => boolean // İngiliz anahtarı gerekir
+  puzzleAddKey: (color: string) => boolean
+  puzzleAddItem: (id: string) => boolean
+  puzzleMarkDone: (flag: string) => void
   puzzleSolve: () => boolean // 4 anahtar gerekir
   puzzleResetProgress: () => void
 }
@@ -164,13 +160,11 @@ const initialWeapons = loadWeapons()
 const initialSkin = loadSkin()
 
 // ── Bulmaca ilerlemesi persist ──
-const PUZZLE_STORE_KEY = 'komikoyun_puzzle_v1'
+const PUZZLE_STORE_KEY = 'komikoyun_puzzle_v2'
 const EMPTY_PUZZLE: PuzzleProgress = {
   keys: [],
-  wrench: false,
-  stairs: false,
-  drawers: [],
-  cabinet: false,
+  items: [],
+  done: [],
   solved: false,
 }
 function loadPuzzle(): PuzzleProgress {
@@ -178,7 +172,14 @@ function loadPuzzle(): PuzzleProgress {
   try {
     const raw = window.localStorage.getItem(PUZZLE_STORE_KEY)
     if (!raw) return { ...EMPTY_PUZZLE }
-    return { ...EMPTY_PUZZLE, ...(JSON.parse(raw) as Partial<PuzzleProgress>) }
+    const parsed = JSON.parse(raw) as Partial<PuzzleProgress>
+    // Alan tiplerini normalize et — bozuk/kısmi kayıt diziyi null yapıp çökmesin
+    return {
+      keys: Array.isArray(parsed.keys) ? parsed.keys.filter((x) => typeof x === 'string') : [],
+      items: Array.isArray(parsed.items) ? parsed.items.filter((x) => typeof x === 'string') : [],
+      done: Array.isArray(parsed.done) ? parsed.done.filter((x) => typeof x === 'string') : [],
+      solved: parsed.solved === true,
+    }
   } catch {
     return { ...EMPTY_PUZZLE }
   }
@@ -690,7 +691,7 @@ export const useGameStore = create<GameState>((set) => ({
     set((s) =>
       s.puzzlePrompt === puzzlePrompt ? {} : { puzzlePrompt }
     ),
-  puzzleCollectKey: (color) => {
+  puzzleAddKey: (color) => {
     const s = useGameStore.getState()
     if (s.puzzle.keys.includes(color)) return false
     const puzzle = { ...s.puzzle, keys: [...s.puzzle.keys, color] }
@@ -698,35 +699,21 @@ export const useGameStore = create<GameState>((set) => ({
     useGameStore.setState({ puzzle })
     return true
   },
-  puzzleCollectWrench: () =>
-    set((s) => {
-      if (s.puzzle.wrench) return {}
-      const puzzle = { ...s.puzzle, wrench: true }
-      savePuzzle(puzzle)
-      return { puzzle }
-    }),
-  puzzleOpenDrawer: (id) =>
-    set((s) => {
-      if (s.puzzle.drawers.includes(id)) return {}
-      const puzzle = { ...s.puzzle, drawers: [...s.puzzle.drawers, id] }
-      savePuzzle(puzzle)
-      return { puzzle }
-    }),
-  puzzleMoveCabinet: () =>
-    set((s) => {
-      if (s.puzzle.cabinet) return {}
-      const puzzle = { ...s.puzzle, cabinet: true }
-      savePuzzle(puzzle)
-      return { puzzle }
-    }),
-  puzzleOpenStairs: () => {
+  puzzleAddItem: (id) => {
     const s = useGameStore.getState()
-    if (!s.puzzle.wrench || s.puzzle.stairs) return false
-    const puzzle = { ...s.puzzle, stairs: true }
+    if (s.puzzle.items.includes(id)) return false
+    const puzzle = { ...s.puzzle, items: [...s.puzzle.items, id] }
     savePuzzle(puzzle)
     useGameStore.setState({ puzzle })
     return true
   },
+  puzzleMarkDone: (flag) =>
+    set((s) => {
+      if (s.puzzle.done.includes(flag)) return {}
+      const puzzle = { ...s.puzzle, done: [...s.puzzle.done, flag] }
+      savePuzzle(puzzle)
+      return { puzzle }
+    }),
   puzzleSolve: () => {
     const s = useGameStore.getState()
     if (s.puzzle.solved) return false

@@ -80,7 +80,7 @@ export default function DayNightCycle({ dirLightRef, ambientRef }: Props) {
 
   // Sahne fog'unu bir kere kur, her frame rengini güncelle
   useEffect(() => {
-    scene.fog = new Fog(fogColor.current, 80, 380)
+    scene.fog = new Fog(fogColor.current, 70, 320)
     return () => {
       scene.fog = null
     }
@@ -118,6 +118,9 @@ export default function DayNightCycle({ dirLightRef, ambientRef }: Props) {
     const altitude = sunY / 80
     const daylight = Math.max(0, altitude)
     const isNight = altitude < -0.1
+
+    // Gece gölge hesaplama (pahalı) gereksiz — kapat; gündüz aç
+    if (dir.castShadow === isNight) dir.castShadow = !isNight
 
     if (isNight) {
       dir.color.setRGB(0.55, 0.65, 0.9)
