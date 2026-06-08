@@ -24,6 +24,7 @@ import ShopModal from '../ui/ShopModal'
 import GraphicsFx from './GraphicsFx'
 import BuildHud from '../ui/BuildHud'
 import MobileLookZone from '../ui/MobileLookZone'
+import PuzzleHud from '../ui/PuzzleHud'
 import { useGameStore } from '@/lib/store'
 import { getPlayerPos } from '@/lib/playerHandle'
 import { startMusic, startAmbient } from '@/lib/sounds'
@@ -167,6 +168,7 @@ export default function Game() {
       <ShopModal />
       <BuildHud />
       <MobileLookZone />
+      <PuzzleHud />
       <StartScreen />
     </div>
   )

@@ -39,6 +39,8 @@ import { computeBuildTarget } from './PlacedBlocks'
 
 const BASE_SPEED = 10
 const JUMP = 13
+// Karakter bu boyuta ulaşınca havada sonsuz zıplama açılır (büyüme iksiriyle)
+const INFINITE_JUMP_SCALE = 3
 const DEADZONE = 0.12
 const INPUT_SMOOTH = 16
 const ROT_SMOOTH = 10
@@ -84,6 +86,7 @@ export default function Player() {
   const pendingLaunch = useRef<[number, number, number] | null>(null)
   const peakFallVel = useRef(0) // en küçük (negatif) vy havada
   const wasGrounded = useRef(true)
+  const wasJumpPressed = useRef(false) // sonsuz zıplama için edge tespiti
 
   const attackProgress = useRef(-1)
   const lastAttackT = useRef(0)
@@ -622,10 +625,20 @@ export default function Player() {
         )
       }
 
-      if ((keys.jump || mobileJump) && grounded) {
+      const jumpHeld = keys.jump || mobileJump
+      const jumpEdge = jumpHeld && !wasJumpPressed.current
+      wasJumpPressed.current = jumpHeld
+      // Büyük boyutta havada sonsuz zıplama (her basışta bir kez)
+      const canInfiniteJump = scale >= INFINITE_JUMP_SCALE
+      if ((grounded && jumpHeld) || (canInfiniteJump && jumpEdge && !grounded)) {
         const mass = body.current.mass()
         const nowSec = performance.now() / 1000
         const jumpBoost = useGameStore.getState().jumpBoostUntil > nowSec ? 1.9 : 1
+        if (!grounded) {
+          // Havada zıplama: önce düşüş hızını sıfırla → tertemiz, anında hop
+          const lv = body.current.linvel()
+          body.current.setLinvel({ x: lv.x, y: 0, z: lv.z }, true)
+        }
         body.current.applyImpulse(
           { x: 0, y: JUMP * mass * Math.pow(scale, 0.55) * jumpBoost, z: 0 },
           true

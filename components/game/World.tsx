@@ -29,6 +29,7 @@ import Shop from './Shop'
 import Challenges from './Challenges'
 import PlacedBlocks from './PlacedBlocks'
 import BrainrotGame from './BrainrotGame'
+import PuzzleZone from './PuzzleZone'
 import { useGameStore } from '@/lib/store'
 
 export default function World() {
@@ -62,6 +63,7 @@ export default function World() {
       <Challenges />
       <PlacedBlocks />
       <BrainrotGame />
+      <PuzzleZone />
       <SpiralStairs position={[-16, 0, -4]} height={16} />
       <HitParticles />
       <RemotePlayers />

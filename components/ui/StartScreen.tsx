@@ -233,11 +233,16 @@ export default function StartScreen() {
           ▶ BAŞLA
         </button>
 
+        <div className="mt-3 rounded-xl bg-purple-500/30 px-4 py-2 text-center text-[11px] font-semibold text-white md:text-xs">
+          🆕 Mor portal → <b>Kaçırılan Akrabayı Kurtar</b> bulmacası ·
+          büyüme iksiriyle dev ol → <b>sonsuz zıplama</b>! 🦘
+        </div>
+
         <div className="mt-4 text-center text-[11px] text-white/70 md:text-xs">
           {isMobile ? (
             <>
               <div>📱 Joystick · ⬇️ Eğil · Butonlarla vur/zıpla</div>
-              <div className="mt-0.5">Dükkanlara yaklaş → E</div>
+              <div className="mt-0.5">Dükkanlara/portallara yaklaş → E</div>
             </>
           ) : (
             <>

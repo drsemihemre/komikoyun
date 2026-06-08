@@ -15,6 +15,17 @@ type Vec2 = { x: number; y: number }
 export type PotionType = 'grow' | 'shrink' | 'speed' | 'slow'
 export type CameraMode = 'third' | 'first'
 
+// ── Kaçırılan Akraba — Bulmaca modu ilerlemesi ──
+export type PuzzleProgress = {
+  keys: string[] // toplanan anahtar renkleri: 'red' | 'blue' | 'green' | 'yellow'
+  wrench: boolean // İngiliz anahtarı alındı mı
+  stairs: boolean // vidalı kapak açıldı → merdiven yükseldi mi
+  drawers: string[] // açılan çekmece id'leri
+  cabinet: boolean // dolap itildi mi (arkasındaki anahtar göründü)
+  solved: boolean // akraba kurtarıldı mı
+}
+export const PUZZLE_KEY_COLORS = ['red', 'blue', 'green', 'yellow'] as const
+
 type GameState = {
   // Input state
   mobileMove: Vec2
@@ -75,6 +86,10 @@ type GameState = {
   jumpBoostUntil: number // AudioContext / performance time (s) when boost ends
   teleportCharges: number
   pendingTeleport: [number, number, number] | null
+  // Kaçırılan Akraba — bulmaca modu
+  puzzle: PuzzleProgress
+  puzzleActive: boolean // oyuncu bulmaca alanında mı (HUD görünürlüğü)
+  puzzlePrompt: string | null // yakındaki etkileşimin etiketi (mobil E butonu)
 
   // Setters
   setMobileMove: (v: Vec2) => void
@@ -123,6 +138,16 @@ type GameState = {
   grantTeleport: (charges: number) => void
   consumeTeleport: () => boolean
   setPendingTeleport: (pos: [number, number, number] | null) => void
+  // Bulmaca aksiyonları
+  setPuzzleActive: (b: boolean) => void
+  setPuzzlePrompt: (s: string | null) => void
+  puzzleCollectKey: (color: string) => boolean
+  puzzleCollectWrench: () => void
+  puzzleOpenDrawer: (id: string) => void
+  puzzleMoveCabinet: () => void
+  puzzleOpenStairs: () => boolean // İngiliz anahtarı gerekir
+  puzzleSolve: () => boolean // 4 anahtar gerekir
+  puzzleResetProgress: () => void
 }
 
 const SCALE_FACTOR = 1.12
@@ -137,6 +162,32 @@ export const PLAYER_HP_MAX = 100
 const initialStats = loadStats()
 const initialWeapons = loadWeapons()
 const initialSkin = loadSkin()
+
+// ── Bulmaca ilerlemesi persist ──
+const PUZZLE_STORE_KEY = 'komikoyun_puzzle_v1'
+const EMPTY_PUZZLE: PuzzleProgress = {
+  keys: [],
+  wrench: false,
+  stairs: false,
+  drawers: [],
+  cabinet: false,
+  solved: false,
+}
+function loadPuzzle(): PuzzleProgress {
+  if (typeof window === 'undefined') return { ...EMPTY_PUZZLE }
+  try {
+    const raw = window.localStorage.getItem(PUZZLE_STORE_KEY)
+    if (!raw) return { ...EMPTY_PUZZLE }
+    return { ...EMPTY_PUZZLE, ...(JSON.parse(raw) as Partial<PuzzleProgress>) }
+  } catch {
+    return { ...EMPTY_PUZZLE }
+  }
+}
+function savePuzzle(p: PuzzleProgress) {
+  try {
+    window.localStorage.setItem(PUZZLE_STORE_KEY, JSON.stringify(p))
+  } catch {}
+}
 
 function persistIfHigh(score: number, hitCount: number, koCount: number) {
   const cur = loadStats()
@@ -224,6 +275,9 @@ export const useGameStore = create<GameState>((set) => ({
   jumpBoostUntil: 0,
   teleportCharges: 0,
   pendingTeleport: null,
+  puzzle: loadPuzzle(),
+  puzzleActive: false,
+  puzzlePrompt: null,
 
   setMobileMove: (mobileMove) => set({ mobileMove }),
   setMobileJump: (mobileJump) => set({ mobileJump }),
@@ -626,6 +680,67 @@ export const useGameStore = create<GameState>((set) => ({
     return true
   },
   setPendingTeleport: (pendingTeleport) => set({ pendingTeleport }),
+
+  // ── Bulmaca modu aksiyonları ──
+  setPuzzleActive: (puzzleActive) =>
+    set((s) =>
+      s.puzzleActive === puzzleActive ? {} : { puzzleActive }
+    ),
+  setPuzzlePrompt: (puzzlePrompt) =>
+    set((s) =>
+      s.puzzlePrompt === puzzlePrompt ? {} : { puzzlePrompt }
+    ),
+  puzzleCollectKey: (color) => {
+    const s = useGameStore.getState()
+    if (s.puzzle.keys.includes(color)) return false
+    const puzzle = { ...s.puzzle, keys: [...s.puzzle.keys, color] }
+    savePuzzle(puzzle)
+    useGameStore.setState({ puzzle })
+    return true
+  },
+  puzzleCollectWrench: () =>
+    set((s) => {
+      if (s.puzzle.wrench) return {}
+      const puzzle = { ...s.puzzle, wrench: true }
+      savePuzzle(puzzle)
+      return { puzzle }
+    }),
+  puzzleOpenDrawer: (id) =>
+    set((s) => {
+      if (s.puzzle.drawers.includes(id)) return {}
+      const puzzle = { ...s.puzzle, drawers: [...s.puzzle.drawers, id] }
+      savePuzzle(puzzle)
+      return { puzzle }
+    }),
+  puzzleMoveCabinet: () =>
+    set((s) => {
+      if (s.puzzle.cabinet) return {}
+      const puzzle = { ...s.puzzle, cabinet: true }
+      savePuzzle(puzzle)
+      return { puzzle }
+    }),
+  puzzleOpenStairs: () => {
+    const s = useGameStore.getState()
+    if (!s.puzzle.wrench || s.puzzle.stairs) return false
+    const puzzle = { ...s.puzzle, stairs: true }
+    savePuzzle(puzzle)
+    useGameStore.setState({ puzzle })
+    return true
+  },
+  puzzleSolve: () => {
+    const s = useGameStore.getState()
+    if (s.puzzle.solved) return false
+    if (s.puzzle.keys.length < 4) return false
+    const puzzle = { ...s.puzzle, solved: true }
+    savePuzzle(puzzle)
+    useGameStore.setState({ puzzle })
+    return true
+  },
+  puzzleResetProgress: () => {
+    const puzzle = { ...EMPTY_PUZZLE }
+    savePuzzle(puzzle)
+    set({ puzzle })
+  },
 }))
 
 // Safe zone configuration

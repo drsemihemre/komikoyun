@@ -28,6 +28,7 @@ export default function HUD() {
   const cycleGraphicsLevel = useGameStore((s) => s.cycleGraphicsLevel)
   const jumpBoostUntil = useGameStore((s) => s.jumpBoostUntil)
   const teleportCharges = useGameStore((s) => s.teleportCharges)
+  const scale = useGameStore((s) => s.scale)
   const currentWeapon = useGameStore((s) => s.currentWeapon)
   const cycleWeapon = useGameStore((s) => s.cycleWeapon)
 
@@ -201,6 +202,13 @@ export default function HUD() {
               </span>
             </button>
           )}
+        </div>
+      )}
+
+      {/* Sonsuz zıplama göstergesi — karakter yeterince büyüdüyse */}
+      {scale >= 3 && (
+        <div className="pointer-events-none absolute left-1/2 top-2 -translate-x-1/2 animate-bounce rounded-full bg-gradient-to-r from-green-400 to-emerald-500 px-4 py-1 text-sm font-black text-white shadow-xl ring-2 ring-white/60">
+          🦘 Sonsuz Zıplama Açık! (Space)
         </div>
       )}
 
