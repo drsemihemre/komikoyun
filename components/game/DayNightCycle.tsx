@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { Sky, Stars } from '@react-three/drei'
-import { Color, Fog, type DirectionalLight, type AmbientLight } from 'three'
+import { Color, Fog, MathUtils, type DirectionalLight, type AmbientLight } from 'three'
 
 type Props = {
   dirLightRef: React.RefObject<DirectionalLight | null>
@@ -69,6 +69,17 @@ function playEzan() {
   }
 }
 
+// Yumuşak gün/gece geçişi için sabit renkler (tek instance — modül seviyesi yeterli)
+const NIGHT_DIR = new Color(0.55, 0.65, 0.9)
+const SUN_DIR = new Color(1, 0.75, 0.5)
+const DAY_DIR = new Color(1, 0.98, 0.93)
+const NIGHT_AMB = new Color(0.35, 0.4, 0.6)
+const SUN_AMB = new Color(1, 0.82, 0.7)
+const DAY_AMB = new Color(1, 1, 1)
+const NIGHT_FOG = new Color(0.12, 0.16, 0.28)
+const DAY_FOG = new Color(0.76, 0.82, 0.91)
+const tmpColor = new Color()
+
 export default function DayNightCycle({ dirLightRef, ambientRef }: Props) {
   const [sunPos, setSunPos] = useState<[number, number, number]>(() =>
     sunPositionFromGameTime()
@@ -122,31 +133,29 @@ export default function DayNightCycle({ dirLightRef, ambientRef }: Props) {
     // Gece gölge hesaplama (pahalı) gereksiz — kapat; gündüz aç
     if (dir.castShadow === isNight) dir.castShadow = !isNight
 
-    if (isNight) {
-      dir.color.setRGB(0.55, 0.65, 0.9)
-      dir.intensity = 0.25
-      amb.color.setRGB(0.35, 0.4, 0.6)
-      amb.intensity = 0.3
-      fogColor.current.setRGB(0.12, 0.16, 0.28)
-    } else if (altitude < 0.2) {
-      dir.color.setRGB(1, 0.75, 0.5)
-      dir.intensity = daylight * 1.3 + 0.3
-      amb.color.setRGB(1, 0.82, 0.7)
-      amb.intensity = 0.35 + daylight * 0.5
-      // Gün doğumu / batımı — turuncu sis
-      fogColor.current.setRGB(
-        0.85 + daylight * 0.1,
-        0.6 + daylight * 0.2,
-        0.5 + daylight * 0.3
-      )
-    } else {
-      dir.color.setRGB(1, 0.98, 0.93)
-      dir.intensity = daylight * 1.3 + 0.1
-      amb.color.setRGB(1, 1, 1)
-      amb.intensity = 0.3 + daylight * 0.6
-      // Gündüz — açık mavi-beyaz atmospheric haze
-      fogColor.current.setRGB(0.76, 0.82, 0.91)
-    }
+    // Yumuşak geçiş: keskin if/else yerine smoothstep karışımı (tek karede POP yok)
+    const duskT = MathUtils.smoothstep(altitude, -0.15, -0.02) // gece → günbatımı
+    const dayT = MathUtils.smoothstep(altitude, 0.12, 0.3) // günbatımı → gündüz
+    dir.color.copy(NIGHT_DIR).lerp(SUN_DIR, duskT).lerp(DAY_DIR, dayT)
+    amb.color.copy(NIGHT_AMB).lerp(SUN_AMB, duskT).lerp(DAY_AMB, dayT)
+    // Günbatımı turuncu sisi — gece laciverti ve gündüz mavisiyle blend
+    tmpColor.setRGB(
+      0.85 + daylight * 0.1,
+      0.6 + daylight * 0.2,
+      0.5 + daylight * 0.3
+    )
+    fogColor.current.copy(NIGHT_FOG).lerp(tmpColor, duskT).lerp(DAY_FOG, dayT)
+    // Intensity tabanı 0.3→0.1 blend edilir; rejim içi değerler birebir korunur
+    dir.intensity = MathUtils.lerp(
+      0.25,
+      daylight * 1.3 + MathUtils.lerp(0.3, 0.1, dayT),
+      duskT
+    )
+    amb.intensity = MathUtils.lerp(
+      0.3,
+      MathUtils.lerp(0.35 + daylight * 0.5, 0.3 + daylight * 0.6, dayT),
+      duskT
+    )
     // scene.fog varsa rengini güncelle
     if (scene.fog && 'color' in scene.fog) {
       ;(scene.fog as Fog).color.copy(fogColor.current)

@@ -104,7 +104,15 @@ function envelope(
     Math.max(0.0001, peak * 0.001),
     c.currentTime + atk + dec
   )
-  g.connect(dest)
+  // Hafif rastgele stereo pan — mono yığılmayı açar, mekan hissi verir
+  try {
+    const pan = c.createStereoPanner()
+    pan.pan.value = (Math.random() * 2 - 1) * 0.35
+    g.connect(pan)
+    pan.connect(dest)
+  } catch {
+    g.connect(dest)
+  }
   return g
 }
 
@@ -198,33 +206,79 @@ export function playHit() {
   void connectMaster
 }
 
+// Her iksir tipi kendine has timbre: grow=sıcak+sub, shrink=detune yüksek,
+// speed=majör arpej, slow=lowpass "wow"
 export function playPotion(type: 'grow' | 'shrink' | 'speed' | 'slow') {
   const c = getCtx()
   if (!c || muted) return
-  const osc = c.createOscillator()
-  osc.type = 'sine'
-  const g = envelope(c, masterGain ?? c.destination, 0.005, 0.25, 0.2)
-  osc.connect(g)
-  const freqMap = {
-    grow: [400, 800],
-    shrink: [800, 400],
-    speed: [500, 1200],
-    slow: [600, 200],
-  } as const
-  const [a, b] = freqMap[type]
-  osc.frequency.setValueAtTime(a, c.currentTime)
-  osc.frequency.exponentialRampToValueAtTime(b, c.currentTime + 0.22)
-  osc.start()
-  osc.stop(c.currentTime + 0.28)
+  const t0 = c.currentTime
 
-  // Sparkle overlay
-  const osc2 = c.createOscillator()
-  osc2.type = 'triangle'
-  osc2.frequency.value = b * 2
-  const g2 = envelope(c, masterGain ?? c.destination, 0.01, 0.15, 0.1)
-  osc2.connect(g2)
-  osc2.start(c.currentTime + 0.08)
-  osc2.stop(c.currentTime + 0.25)
+  if (type === 'grow') {
+    // Sıcak triangle yukarı + bir oktav alttan sine sub
+    const osc = c.createOscillator()
+    osc.type = 'triangle'
+    const g = envelope(c, masterGain ?? c.destination, 0.005, 0.28, 0.2)
+    osc.connect(g)
+    osc.frequency.setValueAtTime(jit(320, 0.05), t0)
+    osc.frequency.exponentialRampToValueAtTime(820, t0 + 0.24)
+    sendReverb(c, g, 0.15)
+    osc.start()
+    osc.stop(t0 + 0.32)
+    const sub = c.createOscillator()
+    sub.type = 'sine'
+    const sg = envelope(c, masterGain ?? c.destination, 0.005, 0.24, 0.12)
+    sub.connect(sg)
+    sub.frequency.setValueAtTime(160, t0)
+    sub.frequency.exponentialRampToValueAtTime(410, t0 + 0.24)
+    sub.start()
+    sub.stop(t0 + 0.28)
+  } else if (type === 'shrink') {
+    // İki detune yüksek sine aşağı — "küçülme cıvıltısı"
+    for (const det of [-8, 8]) {
+      const osc = c.createOscillator()
+      osc.type = 'sine'
+      osc.detune.value = det
+      const g = envelope(c, masterGain ?? c.destination, 0.004, 0.22, 0.12)
+      osc.connect(g)
+      osc.frequency.setValueAtTime(jit(950, 0.05), t0)
+      osc.frequency.exponentialRampToValueAtTime(330, t0 + 0.2)
+      osc.start()
+      osc.stop(t0 + 0.26)
+    }
+  } else if (type === 'speed') {
+    // Hızlı 3 notalık majör arpej (C-E-G hissi) — enerjik
+    const base = jit(520, 0.04)
+    ;[1, 1.26, 1.5].forEach((ratio, i) => {
+      const osc = c.createOscillator()
+      osc.type = i === 2 ? 'triangle' : 'sine'
+      const g = c.createGain()
+      const at = t0 + i * 0.07
+      g.gain.setValueAtTime(0, at)
+      g.gain.linearRampToValueAtTime(0.16, at + 0.008)
+      g.gain.exponentialRampToValueAtTime(0.0001, at + 0.14)
+      g.connect(masterGain ?? c.destination)
+      osc.connect(g)
+      osc.frequency.value = base * ratio
+      osc.start(at)
+      osc.stop(at + 0.16)
+    })
+  } else {
+    // slow: filtre süpürmeli sawtooth "woooow" aşağı
+    const osc = c.createOscillator()
+    osc.type = 'sawtooth'
+    const filter = c.createBiquadFilter()
+    filter.type = 'lowpass'
+    filter.Q.value = 4
+    filter.frequency.setValueAtTime(1800, t0)
+    filter.frequency.exponentialRampToValueAtTime(180, t0 + 0.32)
+    const g = envelope(c, masterGain ?? c.destination, 0.008, 0.3, 0.16)
+    osc.connect(filter)
+    filter.connect(g)
+    osc.frequency.setValueAtTime(jit(420, 0.05), t0)
+    osc.frequency.exponentialRampToValueAtTime(150, t0 + 0.3)
+    osc.start()
+    osc.stop(t0 + 0.36)
+  }
 }
 
 export function playLaunch() {
@@ -528,7 +582,8 @@ function musicEnvelope(
   type: OscillatorType,
   peakGain: number,
   filterCutoff: number = 3500,
-  filterQ: number = 1.2
+  filterQ: number = 1.2,
+  delaySendAmt: number = 0
 ) {
   const attack = Math.min(0.04, duration * 0.15)
   const release = Math.min(0.35, duration * 0.45)
@@ -576,6 +631,13 @@ function musicEnvelope(
     revSend.gain.value = 0.25
     g.connect(revSend)
     revSend.connect(musicReverb)
+  }
+  // Dotted-8th delay send — melodi/sparkle yankısı (kurulu delay hattını besler)
+  if (delaySendAmt > 0 && musicDelay) {
+    const dSend = c.createGain()
+    dSend.gain.value = delaySendAmt
+    g.connect(dSend)
+    dSend.connect(musicDelay)
   }
 
   osc1.start(startAt)
@@ -769,7 +831,8 @@ function scheduleBeat(beatIndex: number, time: number) {
       'sawtooth',
       0.08,
       4500,
-      2
+      2,
+      0.15 // melodi → delay yankısı
     )
   }
 
@@ -783,7 +846,8 @@ function scheduleBeat(beatIndex: number, time: number) {
       'sine',
       0.05,
       8000,
-      0.5
+      0.5,
+      0.18 // sparkle → delay yankısı
     )
     musicEnvelope(
       c,
@@ -793,7 +857,8 @@ function scheduleBeat(beatIndex: number, time: number) {
       'sine',
       0.04,
       8000,
-      0.5
+      0.5,
+      0.18
     )
   }
 
@@ -918,7 +983,8 @@ export function startAmbient() {
   ambientGain = c.createGain()
   ambientGain.gain.value = 0.08
 
-  // Hafif volume modülasyonu (rüzgar dalgaları)
+  // Hafif volume modülasyonu (rüzgar dalgaları) — iki farklı frekansta LFO,
+  // üst üste binince organik/düzensiz esinti hissi verir
   const lfo = c.createOscillator()
   lfo.frequency.value = 0.12
   const lfoGain = c.createGain()
@@ -926,12 +992,59 @@ export function startAmbient() {
   lfo.connect(lfoGain)
   lfoGain.connect(ambientGain.gain)
   lfo.start()
+  const lfo2 = c.createOscillator()
+  lfo2.frequency.value = 0.07
+  const lfo2Gain = c.createGain()
+  lfo2Gain.gain.value = 0.025
+  lfo2.connect(lfo2Gain)
+  lfo2Gain.connect(ambientGain.gain)
+  lfo2.start()
 
   src.connect(filter)
   filter.connect(filter2)
   filter2.connect(ambientGain)
   ambientGain.connect(masterGain ?? c.destination)
   src.start()
+
+  scheduleBirdChirp()
+}
+
+// Ara sıra (8-20 sn'de bir) kısacık kuş cıvıltısı — dünyayı canlı hissettirir
+function scheduleBirdChirp() {
+  if (typeof window === 'undefined') return
+  window.setTimeout(() => {
+    const c = ctx
+    if (c && !muted && ambientGain) {
+      const t0 = c.currentTime
+      const blips = 2 + Math.floor(Math.random() * 3)
+      const base = 2600 + Math.random() * 1400
+      for (let i = 0; i < blips; i++) {
+        const at = t0 + i * (0.09 + Math.random() * 0.06)
+        const osc = c.createOscillator()
+        osc.type = 'sine'
+        osc.frequency.setValueAtTime(base * (1 + Math.random() * 0.2), at)
+        osc.frequency.exponentialRampToValueAtTime(base * 0.72, at + 0.07)
+        const g = c.createGain()
+        g.gain.setValueAtTime(0, at)
+        g.gain.linearRampToValueAtTime(0.028, at + 0.01)
+        g.gain.exponentialRampToValueAtTime(0.0001, at + 0.09)
+        // Kuş hep aynı yerden ötmesin — rastgele pan
+        try {
+          const pan = c.createStereoPanner()
+          pan.pan.value = (Math.random() * 2 - 1) * 0.7
+          osc.connect(g)
+          g.connect(pan)
+          pan.connect(masterGain ?? c.destination)
+        } catch {
+          osc.connect(g)
+          g.connect(masterGain ?? c.destination)
+        }
+        osc.start(at)
+        osc.stop(at + 0.12)
+      }
+    }
+    scheduleBirdChirp()
+  }, 8000 + Math.random() * 12000)
 }
 
 export function setAmbientEnabled(on: boolean) {

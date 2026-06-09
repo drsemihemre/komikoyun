@@ -188,7 +188,7 @@ export default function HUD() {
                   new KeyboardEvent('keydown', { key: 'T' })
                 )
               }}
-              className="pointer-events-auto flex items-center gap-2 rounded-lg bg-gradient-to-r from-purple-500/60 to-fuchsia-500/60 px-2 py-1 text-xs font-bold text-white transition active:scale-95"
+              className={`pointer-events-auto flex items-center gap-2 rounded-lg bg-gradient-to-r from-purple-500/60 to-fuchsia-500/60 font-bold text-white transition active:scale-95 ${isMobile ? 'min-h-[44px] px-3 py-2 text-sm' : 'px-2 py-1 text-xs'}`}
             >
               <span className="text-base">✨</span>
               <span className="flex-1 text-left">
@@ -205,10 +205,10 @@ export default function HUD() {
         </div>
       )}
 
-      {/* Sonsuz zıplama göstergesi — karakter yeterince büyüdüyse */}
+      {/* Sonsuz zıplama göstergesi — karakter yeterince büyüdüyse (iksir barının altında, görünür kalsın) */}
       {scale >= 3 && (
-        <div className="pointer-events-none absolute left-1/2 top-2 -translate-x-1/2 animate-bounce rounded-full bg-gradient-to-r from-green-400 to-emerald-500 px-4 py-1 text-sm font-black text-white shadow-xl ring-2 ring-white/60">
-          🦘 Sonsuz Zıplama Açık! (Space)
+        <div className="pointer-events-none absolute left-1/2 top-40 md:top-44 -translate-x-1/2 animate-bounce rounded-full bg-gradient-to-r from-green-400 to-emerald-500 px-4 py-1 text-sm font-black text-white shadow-xl ring-2 ring-white/60">
+          🦘 Sonsuz Zıplama Açık!{!isMobile && ' (Space)'}
         </div>
       )}
 
@@ -315,8 +315,11 @@ export default function HUD() {
         </div>
       )}
 
-      {/* Current weapon badge — bottom center */}
-      <div className="pointer-events-auto absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 rounded-2xl bg-black/50 px-4 py-2 text-white shadow-xl backdrop-blur-sm">
+      {/* Current weapon badge — bottom center (iPad home-indicator bölgesinin üstünde kalsın) */}
+      <div
+        className="pointer-events-auto absolute left-1/2 -translate-x-1/2 flex items-center gap-2 rounded-2xl bg-black/50 px-4 py-2 text-white shadow-xl backdrop-blur-sm"
+        style={{ bottom: 'max(1rem, calc(env(safe-area-inset-bottom) + 8px))' }}
+      >
         <button
           onClick={() => cycleWeapon()}
           onTouchStart={(e) => {

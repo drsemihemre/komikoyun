@@ -84,6 +84,7 @@ export default function Player() {
   const ragdollStartT = useRef(0)
   const settleStartT = useRef(0)
   const pendingLaunch = useRef<[number, number, number] | null>(null)
+  const deathHandled = useRef(false) // HP=0 respawn timer'ı yalnız bir kez kurulsun
   const peakFallVel = useRef(0) // en küçük (negatif) vy havada
   const wasGrounded = useRef(true)
   const wasJumpPressed = useRef(false) // sonsuz zıplama için edge tespiti
@@ -408,6 +409,23 @@ export default function Player() {
     const isDriving = useGameStore.getState().drivingKart !== null
     if (isDriving) {
       const pos = body.current.translation()
+      // Sürüşte de MP state gönder — yoksa diğer oyuncular bizi binme noktasında donmuş görür
+      const cur = useGameStore.getState()
+      sendState({
+        x: pos.x,
+        y: pos.y,
+        z: pos.z,
+        yaw: currentYaw.current,
+        scale: scale,
+        hp: cur.playerHP,
+        score: cur.score,
+        currentWeapon: cur.currentWeapon,
+        bodyColor: cur.skin.bodyColor,
+        hatKind: cur.skin.hatKind,
+        hatColor: cur.skin.hatColor,
+        gender: cur.skin.gender,
+        hairColor: cur.skin.hairColor,
+      })
       if (cameraMode !== 'first') {
         const camHeight = 6 + scale * 1.2
         const camBack = 12 + scale * 1.8
@@ -479,11 +497,12 @@ export default function Player() {
     }
     wasGrounded.current = grounded
 
-    // --- PENDING LAUNCH (from catapult) ---
+    // --- PENDING LAUNCH (mancınık ragdoll yapar; havuz/buz gibi küçük itmeler yapmaz) ---
     if (pendingLaunch.current) {
       const [lx, ly, lz] = pendingLaunch.current
       pendingLaunch.current = null
-      if (!isRagdoll.current) enterRagdoll()
+      const mag = Math.hypot(lx, ly, lz)
+      if (mag > 6 && !isRagdoll.current) enterRagdoll()
       const mass = body.current.mass()
       body.current.applyImpulse(
         { x: lx * mass, y: ly * mass, z: lz * mass },
@@ -500,10 +519,12 @@ export default function Player() {
       enterRagdoll()
     }
 
-    // HP=0 → ragdoll + respawn (tamamen sıfırla)
-    if (playerHP <= 0 && !isRagdoll.current) {
-      enterRagdoll()
+    // HP=0 → ragdoll + respawn (tamamen sıfırla; ragdoll'dayken ölünce de çalışır)
+    if (playerHP <= 0 && !deathHandled.current) {
+      deathHandled.current = true
+      if (!isRagdoll.current) enterRagdoll()
       setTimeout(() => {
+        deathHandled.current = false // erken çıkıştan ÖNCE sıfırla, bayrak kilitlenmesin
         if (!body.current) return
         body.current.setTranslation({ x: 0, y: 3, z: 0 }, true)
         body.current.setLinvel({ x: 0, y: 0, z: 0 }, true)

@@ -29,7 +29,7 @@ export default function PuzzleHud() {
     ? '🎉 Akrabanı kurtardın! Dünyaya dönebilirsin.'
     : keys.length >= 4
       ? '🔓 Tüm anahtarlar tamam — 3. kattaki kafese git!'
-      : '🔑 4 renkli anahtarı bul (3 kat). Aletler: 🪓 levye, 🔧 anahtar.'
+      : '🔑 4 renkli anahtarı bul (3 kat). Aletler: 🪓 levye, 🔧 İngiliz anahtarı.'
 
   return (
     <>
@@ -91,7 +91,7 @@ export default function PuzzleHud() {
             e.preventDefault()
             document.dispatchEvent(new KeyboardEvent('keydown', { key: 'e' }))
           }}
-          className="pointer-events-auto absolute bottom-28 right-6 z-30 flex max-w-[60vw] items-center gap-2 rounded-2xl bg-yellow-400/95 px-4 py-3 text-sm font-black text-black shadow-2xl ring-2 ring-white/70 transition active:scale-95"
+          className="pointer-events-auto absolute bottom-28 left-1/2 z-30 flex max-w-[60vw] -translate-x-1/2 items-center gap-2 rounded-2xl bg-yellow-400/95 px-4 py-3 text-sm font-black text-black shadow-2xl ring-2 ring-white/70 transition active:scale-95"
         >
           <span className="rounded border border-black bg-white px-1.5">E</span>
           <span className="truncate">{prompt}</span>

@@ -167,11 +167,12 @@ export default function Game() {
       </KeyboardControls>
       <HUD />
       <PotionInventory />
+      {/* Look-zone butonlardan ÖNCE: DOM'da sonra gelen butonlar hit-test'i kazansın */}
+      <MobileLookZone />
       <MobileJoystick />
       <PauseMenu />
       <ShopModal />
       <BuildHud />
-      <MobileLookZone />
       <PuzzleHud />
       <StartScreen />
     </div>

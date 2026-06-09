@@ -5,6 +5,7 @@ import { useFrame } from '@react-three/fiber'
 import { RigidBody, CuboidCollider } from '@react-three/rapier'
 import { Html } from '@react-three/drei'
 import type { Group, Mesh } from 'three'
+import { Vector3 } from 'three'
 import { getPlayerHandle } from '@/lib/playerHandle'
 import { useGameStore } from '@/lib/store'
 import {
@@ -16,7 +17,7 @@ import {
   isLuckyBlock,
   sellPriceFor,
 } from '@/lib/brainrots'
-import { playLaunch, playKo, playPotion } from '@/lib/sounds'
+import { playLaunch, playKo, playPotion, playHit } from '@/lib/sounds'
 import { spawnImpact } from '@/lib/particles'
 import BrainrotFigure from './BrainrotFigure'
 import {
@@ -43,6 +44,9 @@ import { loadNickname } from '@/lib/nickname'
 const MAIN_PORTAL: [number, number, number] = [0, 1.5, 60]
 const ZONE_CENTER: [number, number, number] = [400, 150, 400]
 
+// Paylaşılan geçici vektör — her frame clone() alokasyonunu önler
+const _wp = new Vector3()
+
 const CONVEYOR_START = -18
 const CONVEYOR_END = 18
 const CONVEYOR_TRAVEL_TIME = 22
@@ -66,7 +70,7 @@ const HOME_SIZE = 7 // yarı-genişlik (toplam 14x14 platform)
 const LOCAL_HOME: [number, number, number] = [0, 0, -28]
 
 // ─── ETKİNLİK SİSTEMİ ─────────────────────────────────────────
-const EVENT_COOLDOWN = 3600   // etkinlikler arası bekleme (1 saat)
+const EVENT_COOLDOWN = 600    // etkinlikler arası bekleme (10 dk)
 const FIRST_EVENT_DELAY = 300 // ilk etkinlik 5dk sonra
 const EVENT_DURATION = 300    // etkinlik süresi (5 dakika)
 const BOSS_POS: [number, number, number] = [0, 0, -10]
@@ -237,8 +241,11 @@ function GameZone() {
   const monsterLastAttackRef = useRef(0)
   const lastElapsedRef = useRef(0)
 
-  const { brainrotCash, brainrotOwned, brainrotBuy, brainrotEarn, brainrotTransform } =
-    useGameStore()
+  // Selector'lü abonelik — store'daki her set() çağrısında tüm bölgenin re-render olmasını önler
+  const brainrotCash = useGameStore((s) => s.brainrotCash)
+  const brainrotOwned = useGameStore((s) => s.brainrotOwned)
+  const brainrotBuy = useGameStore((s) => s.brainrotBuy)
+  const brainrotEarn = useGameStore((s) => s.brainrotEarn)
   const isMobile = useGameStore((s) => s.isMobile)
 
   // Şans Bloğu zamanlayıcıları: slotIdx → yerleştirilme zamanı (ms)
@@ -326,7 +333,12 @@ function GameZone() {
     if (!pp) return
     const bx = cx + BOSS_POS[0]
     const bz = cz + BOSS_POS[2]
-    if (Math.hypot(pp.x - bx, pp.z - bz) > 8) return
+    if (Math.hypot(pp.x - bx, pp.z - bz) > 8) {
+      // Menzil dışı — sessiz kalma, çocuğa neden vuramadığını söyle
+      setBanner({ text: '🏃 Canavara yaklaş!', color: '#f59e0b' })
+      setTimeout(() => setBanner(null), 1200)
+      return
+    }
 
     const { currentWeapon } = useGameStore.getState()
     const dmg = currentWeapon === 'fist' ? 1 : 3
@@ -334,6 +346,10 @@ function GameZone() {
     eventHPRef.current = newHP
     setEventHP(newHP)
     lastHitterRef.current = nickname
+
+    // İsabet geri bildirimi — parçacık + ses (cy: bölge dünya yüksekliği)
+    spawnImpact(bx, cy + 2, bz, EVENT_DEFS[eventTypeRef.current].color, 1)
+    playHit()
 
     if (newHP <= 0) {
       // Boss öldürüldü!
@@ -346,8 +362,19 @@ function GameZone() {
       setEventHP(0)
       nextEventAtRef.current = lastElapsedRef.current + EVENT_COOLDOWN
       setNextEventIn(EVENT_COOLDOWN)
-      useGameStore.getState().brainrotReceiveStolen(def.reward)
-      setBanner({ text: `🏆 ${winner} → ${def.rewardName} kazandı!`, color: def.color })
+      const ok = useGameStore.getState().brainrotReceiveStolen(def.reward)
+      if (ok) {
+        setBanner({ text: `🏆 ${winner} → ${def.rewardName} kazandı!`, color: def.color })
+      } else {
+        // Ev dolu (8/8) — ödül kaybolmasın, satış fiyatı kadar nakit telafi ver
+        const rewardDef = getBrainrotDef(def.reward)
+        const cash = rewardDef ? sellPriceFor(rewardDef) : 2000
+        useGameStore.getState().brainrotEarn(cash)
+        setBanner({
+          text: `🏆 Ev dolu! ${def.rewardName} yerine +${cash.toLocaleString('tr-TR')}💰 verildi`,
+          color: def.color,
+        })
+      }
       playPotion('grow')
       setTimeout(() => setBanner(null), 6000)
     }
@@ -461,20 +488,20 @@ function GameZone() {
     // ── Boss saldırısı (her frame, eventActiveRef varsa) ──
     if (eventActiveRef.current && eventTypeRef.current) {
       const def = EVENT_DEFS[eventTypeRef.current]
-      if (t - monsterLastAttackRef.current > def.attackInterval) {
-        const player = getPlayerHandle()
-        const pp = player?.getPos()
-        if (pp) {
-          const bx = cx + BOSS_POS[0]
-          const bz = cz + BOSS_POS[2]
-          const dist = Math.hypot(pp.x - bx, pp.z - bz)
-          const near = dist < 8
-          if (near !== nearMonster) setNearMonster(near)
-          if (dist < def.attackRange) {
-            monsterLastAttackRef.current = t
-            player?.takeHit(def.attackDmg, [(pp.x - bx) * 3, 5, (pp.z - bz) * 3])
-            playKo()
-          }
+      const player = getPlayerHandle()
+      const pp = player?.getPos()
+      if (pp) {
+        const bx = cx + BOSS_POS[0]
+        const bz = cz + BOSS_POS[2]
+        const dist = Math.hypot(pp.x - bx, pp.z - bz)
+        // Yakınlık her frame güncellensin — mobil SALDIR butonu donmasın
+        const near = dist < 8
+        if (near !== nearMonster) setNearMonster(near)
+        // Saldırı yalnızca interval kapısının içinde
+        if (t - monsterLastAttackRef.current > def.attackInterval && dist < def.attackRange) {
+          monsterLastAttackRef.current = t
+          player?.takeHit(def.attackDmg, [(pp.x - bx) * 3, 5, (pp.z - bz) * 3])
+          playKo()
         }
       }
     }
@@ -487,11 +514,15 @@ function GameZone() {
       sendBrainrotState(cash, owned)
     }
 
-    // Eski belt ve walking item'ları temizle
-    setBelt((prev) =>
-      prev.filter((it) => t - it.spawnedAt < CONVEYOR_TRAVEL_TIME)
-    )
-    setWalking((prev) => prev.filter((w) => t - w.startT < w.duration + 0.5))
+    // Eski belt ve walking item'ları temizle — referans korunarak (her frame re-render önle)
+    setBelt((prev) => {
+      const next = prev.filter((it) => t - it.spawnedAt < CONVEYOR_TRAVEL_TIME)
+      return next.length === prev.length ? prev : next
+    })
+    setWalking((prev) => {
+      const next = prev.filter((w) => t - w.startT < w.duration + 0.5)
+      return next.length === prev.length ? prev : next
+    })
   })
 
   // Remote player'ları halka düzeninde yerleştir
@@ -638,9 +669,9 @@ function GameZone() {
             key={item.id}
             item={item}
             onBuy={(defId, price, bx, bz) => {
-              if (handleBuy(defId, price, bx, bz)) {
-                setBelt((prev) => prev.filter((b) => b.id !== item.id))
-              }
+              const ok = handleBuy(defId, price, bx, bz)
+              if (ok) setBelt((prev) => prev.filter((b) => b.id !== item.id))
+              return ok
             }}
           />
         ))}
@@ -845,8 +876,10 @@ function HomeSlot({
   isMobile: boolean
   luckyPlacedAt?: number
 }) {
-  const { brainrotSell, brainrotEarn, brainrotLockSlot, brainrotCash } =
-    useGameStore()
+  // Aksiyonlar selector ile — tüm store'a abone olup her set()'te re-render olma
+  const brainrotSell = useGameStore((s) => s.brainrotSell)
+  const brainrotEarn = useGameStore((s) => s.brainrotEarn)
+  const brainrotLockSlot = useGameStore((s) => s.brainrotLockSlot)
   const lastLockT = useRef(-10)
   const stealStartT = useRef<number | null>(null)
   const [stealProgress, setStealProgress] = useState(0)
@@ -882,9 +915,7 @@ function HomeSlot({
       setNearby(false)
       return
     }
-    const worldPos = groupRef.current.getWorldPosition(
-      groupRef.current.position.clone()
-    )
+    const worldPos = groupRef.current.getWorldPosition(_wp)
     const dx = pp.x - worldPos.x
     const dy = pp.y - worldPos.y
     const dz = pp.z - worldPos.z
@@ -894,7 +925,7 @@ function HomeSlot({
 
     if (isLocal) {
       // Local: Auto-lock (3s cooldown, cash >= 50)
-      if (!isLocked && near && brainrotCash >= 50 && t - lastLockT.current > 3) {
+      if (!isLocked && near && useGameStore.getState().brainrotCash >= 50 && t - lastLockT.current > 3) {
         lastLockT.current = t
         brainrotLockSlot(slotIdx)
         playPotion('grow')
@@ -902,6 +933,12 @@ function HomeSlot({
     } else {
       // Remote: 3 sn dur → çal (kilit değilse)
       if (isLocked) {
+        stealStartT.current = null
+        if (stealProgress > 0) setStealProgress(0)
+        return
+      }
+      // Kendi evim doluysa çalma başlamasın — sunucuda item yok olur (8/8 koruması)
+      if (useGameStore.getState().brainrotOwned.length >= 8) {
         stealStartT.current = null
         if (stealProgress > 0) setStealProgress(0)
         return
@@ -1068,7 +1105,7 @@ function EventPanel({
     const h = Math.floor(s / 3600)
     const m = Math.floor((s % 3600) / 60)
     const sec = s % 60
-    if (h > 0) return `${h}s ${m}dk`
+    if (h > 0) return `${h}sa ${m}dk`
     if (m > 0) return `${m}dk ${sec}sn`
     return `${sec}sn`
   }
@@ -1380,7 +1417,7 @@ function ModeSign({
     const player = getPlayerHandle()
     const pp = player?.getPos()
     if (!pp || !ref.current) return
-    const worldPos = ref.current.getWorldPosition(ref.current.position.clone())
+    const worldPos = ref.current.getWorldPosition(_wp)
     const dx = pp.x - worldPos.x
     const dz = pp.z - worldPos.z
     if (
@@ -1427,11 +1464,12 @@ function BeltBrainrot({
   onBuy,
 }: {
   item: BeltItem
-  onBuy: (defId: string, price: number, fromX: number, fromZ: number) => void
+  onBuy: (defId: string, price: number, fromX: number, fromZ: number) => boolean
 }) {
   const groupRef = useRef<Group>(null)
   const def = useMemo(() => getBrainrotDef(item.defId), [item.defId])
-  const { brainrotCash } = useGameStore()
+  const brainrotCash = useGameStore((s) => s.brainrotCash)
+  const boughtRef = useRef(false) // frame yarışında çift satın almayı önler
 
   useFrame((state) => {
     if (!groupRef.current || !def) return
@@ -1444,14 +1482,13 @@ function BeltBrainrot({
     const player = getPlayerHandle()
     const pp = player?.getPos()
     if (!pp) return
-    const worldPos = groupRef.current.getWorldPosition(
-      groupRef.current.position.clone()
-    )
+    const worldPos = groupRef.current.getWorldPosition(_wp)
     const dx = pp.x - worldPos.x
     const dz = pp.z - worldPos.z
     const near = Math.hypot(dx, dz) < 2.5 && Math.abs(pp.y - worldPos.y) < 3.5
-    if (near && brainrotCash >= def.price) {
-      onBuy(def.id, def.price, x, 0)
+    if (near && !boughtRef.current && brainrotCash >= def.price) {
+      // Yalnızca başarılı satın almada kilitle — slot doluyken tekrar denenebilir
+      boughtRef.current = onBuy(def.id, def.price, x, 0)
     }
   })
 
@@ -1565,7 +1602,7 @@ function TsunamiWave() {
     const player = getPlayerHandle()
     const pp = player?.getPos()
     if (!pp || !waveRef.current) return
-    const wp = waveRef.current.getWorldPosition(waveRef.current.position.clone())
+    const wp = waveRef.current.getWorldPosition(_wp)
     const dx = pp.x - wp.x
     if (Math.abs(dx) < 2.5 && Math.abs(pp.y - wp.y) < 5) {
       if (t - lastHitT.current > 1) {

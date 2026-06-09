@@ -51,7 +51,9 @@ export default function BuildHud() {
   }
 
   return (
-    <div className="pointer-events-auto absolute bottom-40 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-2xl bg-black/70 px-4 py-3 text-white shadow-2xl backdrop-blur-sm">
+    <div
+      className={`pointer-events-auto absolute bottom-40 left-1/2 flex -translate-x-1/2 items-center ${isMobile ? 'gap-3' : 'gap-2'} rounded-2xl bg-black/70 px-4 py-3 text-white shadow-2xl backdrop-blur-sm`}
+    >
       <div className="flex flex-col items-center">
         <span className="text-2xl">{info.emoji}</span>
         <span className="text-xs font-bold">{info.name}</span>
@@ -62,7 +64,7 @@ export default function BuildHud() {
           e.preventDefault()
           cycleMat()
         }}
-        className="rounded-lg bg-white/15 px-3 py-2 text-sm font-bold hover:bg-white/25 active:scale-95"
+        className={`rounded-lg bg-white/15 px-3 py-2 text-sm font-bold hover:bg-white/25 active:scale-95 ${isMobile ? 'min-h-[48px] min-w-[48px]' : ''}`}
       >
         ↻ Malzeme
       </button>
@@ -72,7 +74,7 @@ export default function BuildHud() {
           e.preventDefault()
           onPlace()
         }}
-        className="rounded-lg bg-gradient-to-r from-green-400 to-emerald-500 px-4 py-2 text-sm font-black hover:scale-105 active:scale-95"
+        className={`rounded-lg bg-gradient-to-r from-green-400 to-emerald-500 px-4 py-2 text-sm font-black hover:scale-105 active:scale-95 ${isMobile ? 'min-h-[48px] min-w-[48px]' : ''}`}
       >
         🟩 Yerleştir
       </button>
@@ -82,7 +84,7 @@ export default function BuildHud() {
           e.preventDefault()
           onRemove()
         }}
-        className="rounded-lg bg-gradient-to-r from-orange-400 to-red-500 px-4 py-2 text-sm font-black hover:scale-105 active:scale-95"
+        className={`rounded-lg bg-gradient-to-r from-orange-400 to-red-500 px-4 py-2 text-sm font-black hover:scale-105 active:scale-95 ${isMobile ? 'min-h-[48px] min-w-[48px]' : ''}`}
       >
         ❌ Sil
       </button>
@@ -90,7 +92,7 @@ export default function BuildHud() {
         onClick={() => {
           if (confirm('Tüm blokları silmek istiyor musun?')) clearBlocks()
         }}
-        className="rounded-lg bg-white/15 px-3 py-2 text-xs hover:bg-white/25 active:scale-95"
+        className={`rounded-lg bg-white/15 px-3 py-2 text-xs hover:bg-white/25 active:scale-95 ${isMobile ? 'min-h-[48px] min-w-[48px]' : ''}`}
         title="Hepsini temizle"
       >
         🗑️
@@ -101,7 +103,7 @@ export default function BuildHud() {
           e.preventDefault()
           useGameStore.getState().toggleBuildMode()
         }}
-        className="ml-2 rounded-lg bg-white/15 px-3 py-2 text-sm hover:bg-white/25 active:scale-95"
+        className={`ml-2 rounded-lg bg-white/15 px-3 py-2 text-sm hover:bg-white/25 active:scale-95 ${isMobile ? 'min-h-[48px] min-w-[48px]' : ''}`}
       >
         ✕
       </button>

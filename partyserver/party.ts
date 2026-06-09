@@ -262,11 +262,8 @@ export default class KomikOyunParty implements Party.Server {
       if (slot.lockedUntil > nowS) return // kilitli, çalınamaz
       const stolenDefId = slot.defId
 
-      // Server-side state update (optimistik)
-      victim.brOwned = victim.brOwned.filter(
-        (o) => o.slotIdx !== parsed.slotIdx
-      )
-      // Hırsıza boş slot bul
+      // ÖNCE hırsıza boş slot bul — ev doluysa çalma hiç gerçekleşmesin
+      // (eski sıra kurbandan silip slot bulamayınca brainrot'u yok ediyordu)
       const usedSlots = new Set(player.brOwned.map((o) => o.slotIdx))
       let freeSlot = -1
       for (let i = 0; i < 8; i++) {
@@ -275,14 +272,18 @@ export default class KomikOyunParty implements Party.Server {
           break
         }
       }
-      if (freeSlot >= 0) {
-        player.brOwned.push({
-          id: `o${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-          defId: stolenDefId,
-          slotIdx: freeSlot,
-          lockedUntil: 0,
-        })
-      }
+      if (freeSlot < 0) return
+
+      // Server-side state update
+      victim.brOwned = victim.brOwned.filter(
+        (o) => o.slotIdx !== parsed.slotIdx
+      )
+      player.brOwned.push({
+        id: `o${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        defId: stolenDefId,
+        slotIdx: freeSlot,
+        lockedUntil: 0,
+      })
 
       // Notify thief
       sender.send(

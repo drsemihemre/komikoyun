@@ -24,7 +24,6 @@ export default function SkyTraffic() {
 
   useFrame((state) => {
     const now = Date.now() / 1000
-    let triggered = false
 
     // Plane: every 35-55 seconds
     if (now > nextPlaneAt.current) {
@@ -44,7 +43,6 @@ export default function SkyTraffic() {
         },
       ])
       nextPlaneAt.current = now + 35 + Math.random() * 20
-      triggered = true
     }
 
     // Superman: every 45-70 seconds
@@ -64,7 +62,6 @@ export default function SkyTraffic() {
         },
       ])
       nextSupermanAt.current = now + 45 + Math.random() * 25
-      triggered = true
     }
 
     // Rocket: every 70-110 seconds
@@ -83,13 +80,13 @@ export default function SkyTraffic() {
         },
       ])
       nextRocketAt.current = now + 70 + Math.random() * 40
-      triggered = true
     }
 
-    // Clean up expired
-    if (triggered || Math.random() < 0.01) {
-      setFlyers((prev) => prev.filter((f) => now - f.startT < f.duration))
-    }
+    // Süresi bitenleri her frame temizle; değişiklik yoksa aynı referans → re-render yok
+    setFlyers((prev) => {
+      const next = prev.filter((f) => now - f.startT < f.duration)
+      return next.length === prev.length ? prev : next
+    })
 
     void state
   })
@@ -110,6 +107,7 @@ function Flyer({ flyer }: { flyer: FlyerState }) {
     if (!groupRef.current) return
     const now = Date.now() / 1000
     const elapsed = now - flyer.startT
+    if (elapsed > flyer.duration) return // süresi bitti — temizlik unmount edecek
     const t = Math.min(1, elapsed / flyer.duration)
     const x = flyer.startPos[0] + (flyer.endPos[0] - flyer.startPos[0]) * t
     const y = flyer.startPos[1] + (flyer.endPos[1] - flyer.startPos[1]) * t

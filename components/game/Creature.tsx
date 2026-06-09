@@ -405,6 +405,20 @@ export default function Creature({
 
     const player = getPlayerHandle()
     const playerPos = player?.getPos()
+
+    // Uzak-mesafe kapısı: fog-far=320 ötesi görünmez → AI/animasyon/fizik komutlarını atla
+    // (fail-safe ve arena kelepçesi yukarıda çalıştı; gövde durunca Rapier uyuyabilir)
+    if (playerPos) {
+      const dFar = Math.hypot(playerPos.x - pos.x, playerPos.z - pos.z)
+      if (dFar > 350) {
+        const lv = body.current.linvel()
+        if (Math.abs(lv.x) > 0.05 || Math.abs(lv.z) > 0.05) {
+          body.current.setLinvel({ x: 0, y: lv.y, z: 0 }, true)
+        }
+        return
+      }
+    }
+
     const playerDown = player?.isDown() ?? true
 
     let dx = 0,

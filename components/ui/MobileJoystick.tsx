@@ -93,8 +93,9 @@ export default function MobileJoystick() {
       setMobileJump(false)
       setMobileAttack(false)
       setMobileWeaponFire(false)
+      setMobileCrouch(false)
     }
-  }, [isMobile, setMobileMove, setMobileJump, setMobileAttack, setMobileWeaponFire])
+  }, [isMobile, setMobileMove, setMobileJump, setMobileAttack, setMobileWeaponFire, setMobileCrouch])
 
   if (!isMobile) return null
 
@@ -171,7 +172,7 @@ export default function MobileJoystick() {
 
       {/* Crouch button — joystick'in üstünde sol alt */}
       <button
-        className="absolute bottom-48 left-24 h-14 w-14 touch-none rounded-full border-4 border-white/80 bg-gradient-to-br from-slate-500 to-slate-700 text-xl font-black text-white shadow-2xl active:scale-95"
+        className="absolute bottom-56 left-24 h-14 w-14 touch-none rounded-full border-4 border-white/80 bg-gradient-to-br from-slate-500 to-slate-700 text-xl font-black text-white shadow-2xl active:scale-95"
         onTouchStart={(e) => {
           e.preventDefault()
           setMobileCrouch(true)

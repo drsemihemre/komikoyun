@@ -35,17 +35,9 @@ export default function GraphicsFx() {
     return () => clearInterval(id)
   }, [])
 
-  // Saate göre HDRI preset
+  // Saate göre HDRI preset — DayNightCycle ile uyumlu (güneş DAY_START=3'te doğar)
   const preset: 'night' | 'sunset' | 'park' | 'dawn' =
-    hour < 5
-      ? 'night'
-      : hour < 7
-        ? 'dawn'
-        : hour >= 21
-          ? 'night'
-          : hour >= 19
-            ? 'sunset'
-            : 'park'
+    hour < 3 || hour >= 21 ? 'night' : hour < 6 ? 'dawn' : hour >= 19 ? 'sunset' : 'park'
 
   if (level === 'low') {
     return (

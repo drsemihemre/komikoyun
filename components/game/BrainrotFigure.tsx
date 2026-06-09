@@ -4,6 +4,7 @@ import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Text } from '@react-three/drei'
 import type { Group, Mesh } from 'three'
+import { AdditiveBlending } from 'three'
 import type { BrainrotDef } from '@/lib/brainrots'
 import { RARITY_GLOW } from '@/lib/brainrots'
 
@@ -77,10 +78,13 @@ export default function BrainrotFigure({ def, idle = true, scale = 1 }: Props) {
       {glow > 0 && (
         <mesh ref={auraRef} position={[0, bodyHeight * 0.5 + 0.4, 0]}>
           <sphereGeometry args={[bodyRadius * 1.6, 16, 14]} />
+          {/* Additive blend: gövdeyi soluklaştırmadan renkli ışıma (Bloom yakalar) */}
           <meshBasicMaterial
             color={def.accent}
             transparent
-            opacity={Math.min(0.25, glow * 0.08)}
+            opacity={Math.min(0.35, glow * 0.1)}
+            blending={AdditiveBlending}
+            depthWrite={false}
           />
         </mesh>
       )}
@@ -733,7 +737,14 @@ function Accessory({
     return (
       <mesh position={[0, topY, 0]}>
         <sphereGeometry args={[r * 1.2, 16, 14]} />
-        <meshBasicMaterial color={def.accent} transparent opacity={0.3} />
+        {/* Aura ile aynı desen: additive parıltı */}
+        <meshBasicMaterial
+          color={def.accent}
+          transparent
+          opacity={0.3}
+          blending={AdditiveBlending}
+          depthWrite={false}
+        />
       </mesh>
     )
   }

@@ -54,9 +54,14 @@ export default function PotionInventory() {
   const potionHits = useGameStore((s) => s.potionHits)
   const resetPotions = useGameStore((s) => s.resetPotions)
   const isMobile = useGameStore((s) => s.isMobile)
+  const puzzleActive = useGameStore((s) => s.puzzleActive)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Oyun başlamadan, pause'dayken, bulmaca alanındayken ya da input'a yazarken iksir içme
+      const st = useGameStore.getState()
+      if (!st.gameStarted || st.paused || st.puzzleActive) return
+      if ((e.target as HTMLElement)?.tagName === 'INPUT') return
       if (e.repeat) return
       if (e.key === '1') drinkPotion('grow')
       else if (e.key === '2') drinkPotion('shrink')
@@ -67,6 +72,9 @@ export default function PotionInventory() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [drinkPotion, resetPotions])
+
+  // Bulmaca alanındayken iksir barı gizli — PuzzleHud üst-orta paneliyle çakışmasın
+  if (puzzleActive) return null
 
   return (
     <>

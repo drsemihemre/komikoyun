@@ -18,6 +18,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
+  viewportFit: 'cover', // env(safe-area-inset-*) değerlerini aktifleştirir (iPad home-indicator)
   themeColor: '#87ceeb',
 }
 

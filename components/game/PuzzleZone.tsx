@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { RigidBody, CuboidCollider } from '@react-three/rapier'
 import { Html } from '@react-three/drei'
-import type { Group, Mesh } from 'three'
+import type { Group, Mesh, PointLight } from 'three'
 import { getPlayerHandle } from '@/lib/playerHandle'
 import { useGameStore, type PuzzleProgress } from '@/lib/store'
 import { playLaunch, playPotion, playKo } from '@/lib/sounds'
@@ -74,9 +74,10 @@ function flash(sb: (b: Banner | null) => void, text: string, color: string, ms =
   setTimeout(() => sb(null), ms)
 }
 
-function addKey(color: string, sb: (b: Banner | null) => void) {
+function addKey(color: string, pos: [number, number, number], sb: (b: Banner | null) => void) {
   if (useGameStore.getState().puzzleAddKey(color)) {
     playPotion('grow')
+    spawnImpact(pos[0], pos[1], pos[2], KEY_HEX[color], 1.5) // alım partikülü (world koordinat)
     flash(sb, `${KEY_LABEL[color]} anahtar alındı! (${useGameStore.getState().puzzle.keys.length}/4)`, KEY_HEX[color])
   }
 }
@@ -90,10 +91,11 @@ function getInteractables(p: PuzzleProgress): Interactable[] {
 
   // ───── KAT 1 ─────
   if (!has(it, 'crowbar')) {
+    const cbPos = w(-15.3, F1 + 3.8, -14.7)
     list.push({
-      id: 'crowbar', pos: w(-15.3, F1 + 3.8, -14.7), radius: 3,
+      id: 'crowbar', pos: cbPos, radius: 3,
       prompt: '🪓 Levyeyi al', actionable: true,
-      run: (sb) => { if (useGameStore.getState().puzzleAddItem('crowbar')) { playPotion('grow'); flash(sb, '🪓 Levye alındı! Tahtalı pencereleri açabilirsin.', '#f59e0b', 3000) } },
+      run: (sb) => { if (useGameStore.getState().puzzleAddItem('crowbar')) { playPotion('grow'); spawnImpact(cbPos[0], cbPos[1], cbPos[2], '#f59e0b', 1.5); flash(sb, '🪓 Levye alındı! Tahtalı pencereleri açabilirsin.', '#f59e0b', 3000) } },
     })
   }
   if (!has(d, 'w1')) {
@@ -104,10 +106,11 @@ function getInteractables(p: PuzzleProgress): Interactable[] {
       run: (sb) => { useGameStore.getState().puzzleMarkDone('w1'); playKo(); spawnImpact(CX - 18, F1 + 2.4, CZ - 6, '#a16207', 2); flash(sb, '🪓 Tahtalar söküldü — arkada İngiliz anahtarı var!', '#22c55e', 3000) },
     })
   } else if (!has(it, 'wrench')) {
+    const wrPos = w(-18, F1 + 1.6, -6)
     list.push({
-      id: 'wrench', pos: w(-18, F1 + 1.6, -6), radius: 2.6,
+      id: 'wrench', pos: wrPos, radius: 2.6,
       prompt: '🔧 İngiliz anahtarını al', actionable: true,
-      run: (sb) => { if (useGameStore.getState().puzzleAddItem('wrench')) { playPotion('grow'); flash(sb, '🔧 İngiliz anahtarı alındı! Vidalı kapağı sök.', '#f59e0b', 3000) } },
+      run: (sb) => { if (useGameStore.getState().puzzleAddItem('wrench')) { playPotion('grow'); spawnImpact(wrPos[0], wrPos[1], wrPos[2], '#f59e0b', 1.5); flash(sb, '🔧 İngiliz anahtarı alındı! Vidalı kapağı sök.', '#f59e0b', 3000) } },
     })
   }
   if (!has(d, 'hatch')) {
@@ -125,14 +128,16 @@ function getInteractables(p: PuzzleProgress): Interactable[] {
       run: (sb) => { useGameStore.getState().puzzleMarkDone('crate'); playPotion('shrink'); flash(sb, '🔴 Sandığın arkasında kırmızı anahtar var!', '#ef4444') },
     })
   } else if (!has(k, 'red')) {
-    list.push({ id: 'red', pos: w(-12, F1 + 0.9, 14.2), radius: 2.6, prompt: '🔴 Kırmızı anahtarı al', actionable: true, run: (sb) => addKey('red', sb) })
+    const redPos = w(-12, F1 + 0.9, 14.2)
+    list.push({ id: 'red', pos: redPos, radius: 2.6, prompt: '🔴 Kırmızı anahtarı al', actionable: true, run: (sb) => addKey('red', redPos, sb) })
   }
 
   // ───── KAT 2 ─────
   if (!has(d, 'wardrobe')) {
     list.push({ id: 'wardrobe', pos: w(-16, F2 + 1, -14), radius: 3.2, prompt: '🚪 Dolabı aç', actionable: true, run: (sb) => { useGameStore.getState().puzzleMarkDone('wardrobe'); playPotion('shrink'); flash(sb, '🔵 Dolapta mavi anahtar var!', '#3b82f6') } })
   } else if (!has(k, 'blue')) {
-    list.push({ id: 'blue', pos: w(-16, F2 + 1.4, -13.3), radius: 2.6, prompt: '🔵 Mavi anahtarı al', actionable: true, run: (sb) => addKey('blue', sb) })
+    const bluePos = w(-16, F2 + 1.4, -13.3)
+    list.push({ id: 'blue', pos: bluePos, radius: 2.6, prompt: '🔵 Mavi anahtarı al', actionable: true, run: (sb) => addKey('blue', bluePos, sb) })
   }
   if (!has(d, 'w2')) {
     list.push({
@@ -142,12 +147,14 @@ function getInteractables(p: PuzzleProgress): Interactable[] {
       run: (sb) => { useGameStore.getState().puzzleMarkDone('w2'); playKo(); spawnImpact(CX - 18, F2 + 2.4, CZ - 6, '#a16207', 2); flash(sb, '🟡 Tahtalar söküldü — sarı anahtar göründü!', '#eab308', 3000) },
     })
   } else if (!has(k, 'yellow')) {
-    list.push({ id: 'yellow', pos: w(-18, F2 + 1.6, -6), radius: 2.6, prompt: '🟡 Sarı anahtarı al', actionable: true, run: (sb) => addKey('yellow', sb) })
+    const yellowPos = w(-18, F2 + 1.6, -6)
+    list.push({ id: 'yellow', pos: yellowPos, radius: 2.6, prompt: '🟡 Sarı anahtarı al', actionable: true, run: (sb) => addKey('yellow', yellowPos, sb) })
   }
   if (!has(d, 'drawer')) {
     list.push({ id: 'drawer', pos: w(0, F2 + 1, 14), radius: 3, prompt: '🗄️ Çekmeceyi aç', actionable: true, run: (sb) => { useGameStore.getState().puzzleMarkDone('drawer'); playPotion('shrink'); flash(sb, '🩴 Çekmecede komşunun terliği var!', '#06b6d4') } })
   } else if (!has(it, 'slipper')) {
-    list.push({ id: 'slipper', pos: w(0, F2 + 1.5, 15.5), radius: 2.6, prompt: '🩴 Terliği al', actionable: true, run: (sb) => { if (useGameStore.getState().puzzleAddItem('slipper')) { playPotion('grow'); flash(sb, '🩴 Terlik alındı! Huysuz komşuya ver.', '#06b6d4', 3000) } } })
+    const slPos = w(0, F2 + 1.5, 15.5)
+    list.push({ id: 'slipper', pos: slPos, radius: 2.6, prompt: '🩴 Terliği al', actionable: true, run: (sb) => { if (useGameStore.getState().puzzleAddItem('slipper')) { playPotion('grow'); spawnImpact(slPos[0], slPos[1], slPos[2], '#06b6d4', 1.5); flash(sb, '🩴 Terlik alındı! Huysuz komşuya ver.', '#06b6d4', 3000) } } })
   }
   if (!has(d, 'neighbor')) {
     list.push({
@@ -160,7 +167,8 @@ function getInteractables(p: PuzzleProgress): Interactable[] {
 
   // ───── KAT 3 ─────
   if (!has(k, 'green')) {
-    list.push({ id: 'green', pos: w(14.3, F3 + 2.7, -12.3), radius: 3, prompt: '🟢 Yeşil anahtarı al', actionable: true, run: (sb) => addKey('green', sb) })
+    const greenPos = w(14.3, F3 + 2.7, -12.3)
+    list.push({ id: 'green', pos: greenPos, radius: 3, prompt: '🟢 Yeşil anahtarı al', actionable: true, run: (sb) => addKey('green', greenPos, sb) })
   }
   if (!p.solved) {
     const ready = k.length >= 4
@@ -277,10 +285,8 @@ function Lair() {
     <group position={PZONE}>
       <Shell />
 
-      {/* Atmosfer ışıkları (her katta 1, statik) */}
-      <pointLight position={[0, F1 + 5, 0]} intensity={16} distance={32} color="#ff8c42" />
-      <pointLight position={[0, F2 + 5, 0]} intensity={14} distance={30} color="#c084fc" />
-      <pointLight position={[0, F3 + 5, 0]} intensity={16} distance={30} color="#ff8c42" />
+      {/* Atmosfer ışıkları (her katta 1, titrek) */}
+      <LairLights />
 
       <Sign pos={[0, F1 + 5, 17]} text="😈 Kaçıranın 3 Katlı İni — yukarı çık, akrabanı kurtar!" />
 
@@ -339,6 +345,26 @@ function Banner3D({ banner }: { banner: Banner }) {
   )
 }
 
+// Titrek in ışıkları — mum/eski ampul hissi (yalnız oyuncu alandayken anime)
+function LairLights() {
+  const refs = [useRef<PointLight>(null), useRef<PointLight>(null), useRef<PointLight>(null)]
+  useFrame((s) => {
+    if (!ZS.active) return
+    const t = s.clock.elapsedTime
+    refs.forEach((r, i) => {
+      if (r.current) r.current.intensity = (i === 1 ? 14 : 16) * (0.88 + 0.1 * Math.sin(t * 9 + i * 2.1) + 0.06 * Math.sin(t * 23 + i * 5))
+    })
+  })
+  const DIST = [32, 30, 30]
+  return (
+    <>
+      {[F1, F2, F3].map((f, i) => (
+        <pointLight key={i} ref={refs[i]} position={[0, f + 5, 0]} intensity={i === 1 ? 14 : 16} distance={DIST[i]} color={i === 1 ? '#c084fc' : '#ff8c42'} />
+      ))}
+    </>
+  )
+}
+
 // ───────────────────────────────────────────────────────────────
 //  YAPISAL KABUK: 3 kat döşeme (rampa boşluklu) + duvarlar
 // ───────────────────────────────────────────────────────────────
@@ -371,6 +397,13 @@ function Shell() {
           </mesh>
         </group>
       ))}
+
+      {/* Çatı — gökyüzünü kapatır, güneş gölgesiyle iç mekan gündüz de loş kalır */}
+      <CuboidCollider args={[20, 0.3, 20]} position={[0, 24.3, 0]} />
+      <mesh position={[0, 24.3, 0]} castShadow>
+        <boxGeometry args={[40, 0.6, 40]} />
+        <meshToonMaterial color="#16101e" />
+      </mesh>
     </RigidBody>
   )
 }

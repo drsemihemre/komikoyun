@@ -1,5 +1,6 @@
 'use client'
 
+import { useRef, useState } from 'react'
 import { useGameStore, PLAYER_HP_MAX } from '@/lib/store'
 import { resetPlayer } from '@/lib/playerHandle'
 
@@ -13,6 +14,11 @@ export default function PauseMenu() {
   const koCount = useGameStore((s) => s.koCount)
   const hitCount = useGameStore((s) => s.hitCount)
 
+  // SIFIRLA için iki aşamalı onay — yanlış dokunuş skoru silmesin
+  const [confirming, setConfirming] = useState(false)
+  const armedAtRef = useRef(0)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   if (!paused || !gameStarted) return null
 
   const onResume = () => {
@@ -23,6 +29,22 @@ export default function PauseMenu() {
   const onReset = () => {
     resetGame()
     resetPlayer()
+  }
+
+  const onResetClick = () => {
+    const now = Date.now()
+    if (!confirming) {
+      setConfirming(true)
+      armedAtRef.current = now
+      if (timerRef.current) clearTimeout(timerRef.current)
+      timerRef.current = setTimeout(() => setConfirming(false), 2500)
+      return
+    }
+    // touchstart sonrası gelen hayalet click'i ve hızlı çift dokunuşu yoksay
+    if (now - armedAtRef.current < 600) return
+    if (timerRef.current) clearTimeout(timerRef.current)
+    setConfirming(false)
+    onReset()
   }
 
   return (
@@ -64,14 +86,18 @@ export default function PauseMenu() {
             ▶ DEVAM
           </button>
           <button
-            onClick={onReset}
+            onClick={onResetClick}
             onTouchStart={(e) => {
               e.preventDefault()
-              onReset()
+              onResetClick()
             }}
-            className="rounded-2xl bg-gradient-to-br from-orange-400 to-rose-500 px-8 py-4 text-xl font-black text-white shadow-xl transition hover:scale-105 active:scale-95"
+            className={`rounded-2xl bg-gradient-to-br px-8 py-4 text-xl font-black text-white shadow-xl transition hover:scale-105 active:scale-95 ${
+              confirming
+                ? 'from-red-500 to-rose-600'
+                : 'from-orange-400 to-rose-500'
+            }`}
           >
-            🔄 SIFIRLA
+            {confirming ? '⚠️ Emin misin? Tekrar bas' : '🔄 SIFIRLA'}
           </button>
         </div>
 

@@ -137,29 +137,20 @@ export default function Decorations() {
           />
         ))}
       </Instances>
-      {/* ─────────── ÇİÇEKLER — petal blob (her renk için ayrı instance seti) ─────────── */}
-      {FLOWER_COLORS.map((color) => {
-        const group = flowers.filter((f) => f.color === color)
-        if (group.length === 0) return null
-        return (
-          <Instances
-            key={`fp-${color}`}
-            limit={group.length + 5}
-            range={group.length + 5}
-            castShadow
-          >
-            <sphereGeometry args={[1, 8, 8]} />
-            <meshStandardMaterial color={color} roughness={0.6} metalness={0.05} />
-            {group.map((f) => (
-              <Instance
-                key={`fp${f.id}`}
-                position={[f.x, 0.55 * f.size, f.z]}
-                scale={f.size}
-              />
-            ))}
-          </Instances>
-        )
-      })}
+      {/* ─────────── ÇİÇEKLER — petal blob (tek batch, per-instance renk) ─────────── */}
+      <Instances limit={density.flowers + 10} range={density.flowers + 10} castShadow>
+        <sphereGeometry args={[1, 8, 8]} />
+        {/* color prop verme — beyaz taban ki instanceColor doğru görünsün */}
+        <meshStandardMaterial roughness={0.6} metalness={0.05} />
+        {flowers.map((f) => (
+          <Instance
+            key={`fp${f.id}`}
+            color={f.color}
+            position={[f.x, 0.55 * f.size, f.z]}
+            scale={f.size}
+          />
+        ))}
+      </Instances>
 
       {/* ─────────── TAŞLAR (200 adet, tek draw call) ─────────── */}
       <Instances limit={density.rocks + 10} range={density.rocks + 10} castShadow receiveShadow>
@@ -188,49 +179,44 @@ export default function Decorations() {
           />
         ))}
       </Instances>
-      {/* ─────────── AĞAÇLAR — 3 kademeli yaprak (cone LOD stack) ─────────── */}
-      {foliageColors.slice(0, 3).map((color, colorIdx) => {
-        // 3 farklı renkte ağaç yaprağı — çeşitlilik için
-        const group = trees.filter((_, i) => i % 3 === colorIdx)
-        if (group.length === 0) return null
-        return (
-          <group key={`tf-${color}`}>
-            <Instances limit={group.length + 5} range={group.length + 5} castShadow>
-              <coneGeometry args={[1.2, 1.5, 8]} />
-              <meshStandardMaterial color={color} roughness={0.85} />
-              {group.map((t) => (
-                <Instance
-                  key={`tf1-${t.id}`}
-                  position={[t.x, 2.2 * t.size, t.z]}
-                  scale={t.size}
-                />
-              ))}
-            </Instances>
-            <Instances limit={group.length + 5} range={group.length + 5} castShadow>
-              <coneGeometry args={[0.9, 1.2, 8]} />
-              <meshStandardMaterial color={color} roughness={0.85} />
-              {group.map((t) => (
-                <Instance
-                  key={`tf2-${t.id}`}
-                  position={[t.x, 3.1 * t.size, t.z]}
-                  scale={t.size * 0.9}
-                />
-              ))}
-            </Instances>
-            <Instances limit={group.length + 5} range={group.length + 5} castShadow>
-              <coneGeometry args={[0.6, 0.9, 8]} />
-              <meshStandardMaterial color={color} roughness={0.85} />
-              {group.map((t) => (
-                <Instance
-                  key={`tf3-${t.id}`}
-                  position={[t.x, 3.8 * t.size, t.z]}
-                  scale={t.size * 0.75}
-                />
-              ))}
-            </Instances>
-          </group>
-        )
-      })}
+      {/* ─────────── AĞAÇLAR — 3 kademeli yaprak (per-instance renk, kademe başına tek batch) ─────────── */}
+      {/* Renk çeşitliliği instanceColor ile: 9 yerine 3 draw call */}
+      <Instances limit={density.trees + 10} range={density.trees + 10} castShadow>
+        <coneGeometry args={[1.2, 1.5, 8]} />
+        <meshStandardMaterial roughness={0.85} />
+        {trees.map((t) => (
+          <Instance
+            key={`tf1-${t.id}`}
+            color={foliageColors[t.id % 3]}
+            position={[t.x, 2.2 * t.size, t.z]}
+            scale={t.size}
+          />
+        ))}
+      </Instances>
+      <Instances limit={density.trees + 10} range={density.trees + 10} castShadow>
+        <coneGeometry args={[0.9, 1.2, 8]} />
+        <meshStandardMaterial roughness={0.85} />
+        {trees.map((t) => (
+          <Instance
+            key={`tf2-${t.id}`}
+            color={foliageColors[t.id % 3]}
+            position={[t.x, 3.1 * t.size, t.z]}
+            scale={t.size * 0.9}
+          />
+        ))}
+      </Instances>
+      <Instances limit={density.trees + 10} range={density.trees + 10} castShadow>
+        <coneGeometry args={[0.6, 0.9, 8]} />
+        <meshStandardMaterial roughness={0.85} />
+        {trees.map((t) => (
+          <Instance
+            key={`tf3-${t.id}`}
+            color={foliageColors[t.id % 3]}
+            position={[t.x, 3.8 * t.size, t.z]}
+            scale={t.size * 0.75}
+          />
+        ))}
+      </Instances>
     </>
   )
 }
